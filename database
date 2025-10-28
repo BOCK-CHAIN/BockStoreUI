@@ -1,0 +1,391 @@
+-- Extensions (UUID helpers, trigram/FTS are handy later)
+create extension if not exists pgcrypto;
+create extension if not exists pg_trgm;
+
+-- Roles (simple text enum to keep SQL portable)
+create table if not exists roles (
+  role text primary key check (role in ('user','developer','admin'))
+);
+insert into roles(role)
+  values ('user'),('developer'),('admin')
+on conflict do nothing;
+
+-- Link every auth.user to a profile
+create table if not exists profiles (
+  id uuid primary key references auth.users(id) on delete cascade,
+  username text unique,
+  display_name text,
+  role text not null default 'user' references roles(role),
+  created_at timestamptz not null default now()
+);
+
+-- Developer profile is just a flag/metadata on top of profile
+create table if not exists developers (
+  id uuid primary key references profiles(id) on delete cascade,
+  org_name text,
+  verified boolean not null default false
+);
+
+-- Platforms you plan to support
+do $$
+begin
+  if not exists (select 1 from pg_type where typname = 'platform') then
+    create type platform as enum ('android','windows','macos','linux','web','ios');
+  end if;
+end$$;
+
+-- App catalog
+create table if not exists apps (
+  id uuid primary key default gen_random_uuid(),
+  slug text unique not null,
+  name text not null,
+  description text,
+  icon_url text,
+  publisher_id uuid not null references developers(id) on delete cascade,
+  is_listed boolean not null default false,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+-- Keep updated_at fresh
+create or replace function set_updated_at() returns trigger language plpgsql as $$
+begin
+  new.updated_at = now(); return new;
+end$$;
+drop trigger if exists trg_apps_updated on apps;
+create trigger trg_apps_updated before update on apps
+for each row execute function set_updated_at();
+
+-- Categories
+create table if not exists categories (
+  id bigserial primary key,
+  name text unique not null
+);
+create table if not exists app_categories (
+  app_id uuid references apps(id) on delete cascade,
+  category_id bigint references categories(id) on delete cascade,
+  primary key (app_id, category_id)
+);
+
+-- Versions/builds
+create table if not exists app_versions (
+  id uuid primary key default gen_random_uuid(),
+  app_id uuid not null references apps(id) on delete cascade,
+  version text not null,                 -- e.g. 1.2.3
+  platform platform not null,
+  min_os_version text,
+  architecture text,                     -- e.g. arm64, x86_64, universal
+  changelog text,
+  size_bytes bigint,
+  sha256 text,                           -- checksum of the binary
+  storage_key text not null,             -- path inside app-binaries bucket
+  is_prerelease boolean not null default false,
+  created_at timestamptz not null default now(),
+  unique (app_id, platform, version)
+);
+
+-- Media (screenshots)
+create table if not exists screenshots (
+  id bigserial primary key,
+  app_id uuid not null references apps(id) on delete cascade,
+  storage_key text not null,             -- path inside app-media bucket
+  sort_order int not null default 0,
+  created_at timestamptz not null default now()
+);
+
+-- Reviews & ratings
+create table if not exists reviews (
+  id bigserial primary key,
+  app_id uuid not null references apps(id) on delete cascade,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  rating int not null check (rating between 1 and 5),
+  title text,
+  body text,
+  created_at timestamptz not null default now(),
+  unique (app_id, user_id)
+);
+
+-- Installs (for analytics)
+create table if not exists installs (
+  id bigserial primary key,
+  app_id uuid not null references apps(id) on delete cascade,
+  version_id uuid references app_versions(id) on delete set null,
+  user_id uuid references auth.users(id) on delete set null,
+  platform platform,
+  installed_at timestamptz not null default now()
+);
+
+-- ---------- Row Level Security ----------
+alter table profiles enable row level security;
+alter table developers enable row level security;
+alter table apps enable row level security;
+alter table app_versions enable row level security;
+alter table screenshots enable row level security;
+alter table reviews enable row level security;
+alter table installs enable row level security;
+
+-- profiles: users can see themselves; admins can see all (we’ll add admin policy later)
+create policy "profiles_select_self"
+on profiles for select
+using (auth.uid() = id);
+
+create policy "profiles_insert_self"
+on profiles for insert
+with check (auth.uid() = id);
+
+create policy "profiles_update_self"
+on profiles for update
+using (auth.uid() = id);
+
+-- developers: developer record is tied to the same id
+create policy "dev_select_self"
+on developers for select
+using (auth.uid() = id);
+
+create policy "dev_upsert_self"
+on developers for all
+using (auth.uid() = id)
+with check (auth.uid() = id);
+
+-- apps: public can read listed apps; owners can read/write their own
+create policy "apps_public_read_listed"
+on apps for select
+using (is_listed = true);
+
+create policy "apps_owner_full"
+on apps for all
+using (publisher_id = auth.uid())
+with check (publisher_id = auth.uid());
+
+-- versions: public read only for listed parent app; owner full access
+create policy "versions_public_read_via_listed_app"
+on app_versions for select
+using (
+  exists (
+    select 1 from apps a
+    where a.id = app_versions.app_id
+      and (a.is_listed = true or a.publisher_id = auth.uid())
+  )
+);
+
+create policy "versions_owner_full"
+on app_versions for all
+using (
+  exists (
+    select 1 from apps a
+    where a.id = app_versions.app_id
+      and a.publisher_id = auth.uid()
+  )
+)
+with check (
+  exists (
+    select 1 from apps a
+    where a.id = app_versions.app_id
+      and a.publisher_id = auth.uid()
+  )
+);
+
+-- screenshots: same pattern
+create policy "shots_public_read_via_listed_app"
+on screenshots for select
+using (
+  exists (select 1 from apps a where a.id = screenshots.app_id
+          and (a.is_listed = true or a.publisher_id = auth.uid()))
+);
+
+create policy "shots_owner_full"
+on screenshots for all
+using (
+  exists (select 1 from apps a where a.id = screenshots.app_id
+          and a.publisher_id = auth.uid())
+)
+with check (
+  exists (select 1 from apps a where a.id = screenshots.app_id
+          and a.publisher_id = auth.uid())
+);
+
+-- reviews: everyone can read; only author can write/update/delete
+create policy "reviews_public_read"
+on reviews for select
+using (true);
+
+create policy "reviews_author_write"
+on reviews for insert
+with check (auth.uid() = user_id);
+
+create policy "reviews_author_update_delete"
+on reviews for update using (auth.uid() = user_id)
+with check (auth.uid() = user_id);
+
+create policy "reviews_author_delete"
+on reviews for delete using (auth.uid() = user_id);
+
+-- installs: only the user (for their history) and the app owner (aggregates) – start simple: user-only
+create policy "installs_user_read_write"
+on installs for all
+using (auth.uid() = user_id)
+with check (auth.uid() = user_id);
+
+-- Helpful indexes
+create index if not exists idx_apps_name_trgm on apps using gin (name gin_trgm_ops);
+create index if not exists idx_apps_slug on apps(slug);
+create index if not exists idx_versions_app_platform on app_versions(app_id, platform);
+create index if not exists idx_reviews_app on reviews(app_id);
+
+
+-- Allow authenticated developers to upload binaries
+create policy "Allow developer uploads"
+on storage.objects
+for insert
+to authenticated
+with check (
+  bucket_id = 'app-binaries'
+);
+
+-- Allow authenticated developers to update their own binaries
+create policy "Allow developer updates"
+on storage.objects
+for update
+to authenticated
+using ( bucket_id = 'app-binaries' )
+with check ( bucket_id = 'app-binaries' );
+
+-- Allow authenticated developers to delete their own binaries
+create policy "Allow developer deletes"
+on storage.objects
+for delete
+to authenticated
+using ( bucket_id = 'app-binaries' );
+
+
+-- Add video_url column (for YouTube or direct MP4 links)
+ALTER TABLE apps
+ADD COLUMN video_url TEXT;
+
+-- Optional: Add video_thumbnail column for better performance on mobile/web
+ALTER TABLE apps
+ADD COLUMN video_thumbnail TEXT;
+
+
+
+-- WARNING: This schema is for context only and is not meant to be run.
+-- Table order and constraints may not be valid for execution.
+
+CREATE TABLE public.app_categories (
+  app_id uuid NOT NULL,
+  category_id bigint NOT NULL,
+  CONSTRAINT app_categories_pkey PRIMARY KEY (app_id, category_id),
+  CONSTRAINT app_categories_app_id_fkey FOREIGN KEY (app_id) REFERENCES public.apps(id),
+  CONSTRAINT app_categories_category_id_fkey FOREIGN KEY (category_id) REFERENCES public.categories(id)
+);
+CREATE TABLE public.app_versions (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  app_id uuid NOT NULL,
+  version text NOT NULL,
+  platform USER-DEFINED NOT NULL,
+  min_os_version text,
+  architecture text,
+  changelog text,
+  size_bytes bigint,
+  sha256 text,
+  storage_key text,
+  is_prerelease boolean NOT NULL DEFAULT false,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  external_url text,
+  CONSTRAINT app_versions_pkey PRIMARY KEY (id),
+  CONSTRAINT app_versions_app_id_fkey FOREIGN KEY (app_id) REFERENCES public.apps(id),
+  CONSTRAINT fk_app_versions_apps FOREIGN KEY (app_id) REFERENCES public.apps(id)
+);
+CREATE TABLE public.apps (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  slug text NOT NULL UNIQUE,
+  name text NOT NULL,
+  description text,
+  icon_url text,
+  publisher_id uuid NOT NULL,
+  is_listed boolean NOT NULL DEFAULT false,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  category_id integer,
+  banner_video_url text,
+  video_thumbnail text,
+  CONSTRAINT apps_pkey PRIMARY KEY (id),
+  CONSTRAINT apps_publisher_id_fkey FOREIGN KEY (publisher_id) REFERENCES public.developers(id),
+  CONSTRAINT apps_category_id_fkey FOREIGN KEY (category_id) REFERENCES public.categories(id)
+);
+CREATE TABLE public.categories (
+  id bigint NOT NULL DEFAULT nextval('categories_id_seq'::regclass),
+  name text NOT NULL UNIQUE,
+  CONSTRAINT categories_pkey PRIMARY KEY (id)
+);
+CREATE TABLE public.developers (
+  id uuid NOT NULL,
+  org_name text,
+  verified boolean NOT NULL DEFAULT false,
+  bio text,
+  avatar_url text,
+  banner_url text,
+  website_url text,
+  social_x text,
+  social_linkedin text,
+  location text,
+  established_on date,
+  profile_picture_url text,
+  website text,
+  contact_email text,
+  CONSTRAINT developers_pkey PRIMARY KEY (id),
+  CONSTRAINT developers_id_fkey FOREIGN KEY (id) REFERENCES public.profiles(id)
+);
+CREATE TABLE public.installs (
+  id bigint NOT NULL DEFAULT nextval('installs_id_seq'::regclass),
+  app_id uuid NOT NULL,
+  version_id uuid,
+  user_id uuid,
+  platform USER-DEFINED,
+  installed_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT installs_pkey PRIMARY KEY (id),
+  CONSTRAINT installs_app_id_fkey FOREIGN KEY (app_id) REFERENCES public.apps(id),
+  CONSTRAINT installs_version_id_fkey FOREIGN KEY (version_id) REFERENCES public.app_versions(id),
+  CONSTRAINT installs_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id)
+);
+CREATE TABLE public.profiles (
+  id uuid NOT NULL,
+  username text UNIQUE,
+  display_name text,
+  role text NOT NULL DEFAULT 'user'::text,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  avatar_url text,
+  banner_url text,
+  bio text DEFAULT ''::text,
+  website_url text DEFAULT ''::text,
+  CONSTRAINT profiles_pkey PRIMARY KEY (id),
+  CONSTRAINT profiles_id_fkey FOREIGN KEY (id) REFERENCES auth.users(id),
+  CONSTRAINT profiles_role_fkey FOREIGN KEY (role) REFERENCES public.roles(role)
+);
+CREATE TABLE public.reviews (
+  id bigint NOT NULL DEFAULT nextval('reviews_id_seq'::regclass),
+  app_id uuid NOT NULL,
+  user_id uuid NOT NULL,
+  rating integer NOT NULL CHECK (rating >= 1 AND rating <= 5),
+  comment text,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT reviews_pkey PRIMARY KEY (id),
+  CONSTRAINT reviews_app_id_fkey FOREIGN KEY (app_id) REFERENCES public.apps(id),
+  CONSTRAINT reviews_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id),
+  CONSTRAINT fk_reviews_apps FOREIGN KEY (app_id) REFERENCES public.apps(id)
+);
+CREATE TABLE public.roles (
+  role text NOT NULL CHECK (role = ANY (ARRAY['user'::text, 'developer'::text, 'admin'::text])),
+  CONSTRAINT roles_pkey PRIMARY KEY (role)
+);
+CREATE TABLE public.screenshots (
+  id bigint NOT NULL DEFAULT nextval('screenshots_id_seq'::regclass),
+  app_id uuid NOT NULL,
+  storage_key text NOT NULL,
+  sort_order integer NOT NULL DEFAULT 0,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  url text,
+  CONSTRAINT screenshots_pkey PRIMARY KEY (id),
+  CONSTRAINT screenshots_app_id_fkey FOREIGN KEY (app_id) REFERENCES public.apps(id),
+  CONSTRAINT fk_screenshots_apps FOREIGN KEY (app_id) REFERENCES public.apps(id)
+);
