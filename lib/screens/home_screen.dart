@@ -24,7 +24,8 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen>
+    with SingleTickerProviderStateMixin {
   int selectedIndex = 0;
   Timer? _debounce;
   List<AppModel> apps = [];
@@ -33,6 +34,20 @@ class _HomeScreenState extends State<HomeScreen> {
   List recentUpdates = [];
   bool loadingUpdates = true;
   bool _isDarkMode = false;
+  bool _isSearchOpen = false;
+  final TextEditingController _mobileSearchController = TextEditingController();
+  late final AnimationController _searchAnim = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 280),
+  );
+  late final Animation<double> _searchWidth = CurvedAnimation(
+    parent: _searchAnim,
+    curve: Curves.easeInOut,
+  );
+  late final Animation<double> _fadeIn = CurvedAnimation(
+    parent: _searchAnim,
+    curve: Curves.easeIn,
+  );
 
   static const _purple = Color(0xFF6A1B9A);
   static const _bg = Color(0xFFF0F4F0);
@@ -56,6 +71,8 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void dispose() {
     _debounce?.cancel();
+    _mobileSearchController.dispose();
+    _searchAnim.dispose();
     super.dispose();
   }
 
@@ -357,32 +374,67 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
 
       // ── Body ──────────────────────────────────────────────────────────────
-      body: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 1300),
-          child: apps.isEmpty
-              ? Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        Icons.search_off_rounded,
-                        size: 56,
-                        color: Colors.grey.shade300,
-                      ),
-                      const SizedBox(height: 12),
-                      Text(
-                        "No apps found",
-                        style: TextStyle(fontSize: 16, color: _textSecondary),
-                      ),
-                    ],
-                  ),
-                )
-              : isDesktop
-              ? _buildDesktopGrid(width)
-              : getMobileBody(),
-        ),
-      ),
+      body: isDesktop
+          ? Row(
+              children: [
+                // Fixed sidebar
+                _buildDesktopSidebar(),
+                // Main content
+                Expanded(
+                  child: apps.isEmpty
+                      ? Center(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.search_off_rounded,
+                                size: 56,
+                                color: Colors.grey.shade300,
+                              ),
+                              const SizedBox(height: 12),
+                              Text(
+                                "No apps found",
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  color: _textSecondary,
+                                ),
+                              ),
+                            ],
+                          ),
+                        )
+                      : selectedIndex == 0
+                      ? _buildDesktopGrid(width - 240)
+                      : getMobileBody(),
+                ),
+              ],
+            )
+          : Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 1300),
+                child: apps.isEmpty
+                    ? Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.search_off_rounded,
+                              size: 56,
+                              color: Colors.grey.shade300,
+                            ),
+                            const SizedBox(height: 12),
+                            Text(
+                              "No apps found",
+                              style: TextStyle(
+                                fontSize: 16,
+                                color: _textSecondary,
+                              ),
+                            ),
+                          ],
+                        ),
+                      )
+                    : getMobileBody(),
+              ),
+            ),
     );
   }
 
@@ -498,71 +550,145 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // ── Mobile AppBar: logo + search + darkmode + help ────────────────────────
+  // ── Mobile AppBar: animated search expand ────────────────────────────────
   Widget _buildMobileAppBar(AuthProvider auth) {
+    Widget iconBtn({required IconData icon, required VoidCallback onTap}) =>
+        GestureDetector(
+          onTap: onTap,
+          child: Container(
+            padding: const EdgeInsets.all(7),
+            decoration: BoxDecoration(
+              color: _purple.withOpacity(0.08),
+              borderRadius: BorderRadius.circular(9),
+            ),
+            child: Icon(icon, color: _purple, size: 18),
+          ),
+        );
+
+    // The two permanent right-side icons (never move, never overflow)
+    final rightIcons = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        iconBtn(
+          icon: _isSearchOpen ? Icons.close_rounded : Icons.search_rounded,
+          onTap: () {
+            if (_isSearchOpen) {
+              _searchAnim.reverse().then((_) {
+                setState(() => _isSearchOpen = false);
+                _mobileSearchController.clear();
+                fetchApps();
+              });
+            } else {
+              setState(() => _isSearchOpen = true);
+              _searchAnim.forward();
+            }
+          },
+        ),
+        const SizedBox(width: 6),
+        iconBtn(
+          icon: _isDarkMode
+              ? Icons.light_mode_rounded
+              : Icons.dark_mode_rounded,
+          onTap: () => setState(() => _isDarkMode = !_isDarkMode),
+        ),
+      ],
+    );
+
     return Row(
       children: [
-        // Logo icon
-        Container(
-          padding: const EdgeInsets.all(6),
-          decoration: BoxDecoration(
-            color: _purple.withOpacity(0.10),
-            borderRadius: BorderRadius.circular(9),
+        // ── Left side: logo fades+shrinks out, search bar grows in ───────────
+        Expanded(
+          child: AnimatedBuilder(
+            animation: _searchAnim,
+            builder: (context, _) {
+              final t = _searchAnim.value; // 0 = closed, 1 = open
+
+              return Stack(
+                alignment: Alignment.centerLeft,
+                children: [
+                  // Logo — slides left and fades out
+                  if (t < 1.0)
+                    Opacity(
+                      opacity: (1.0 - t * 2).clamp(0.0, 1.0),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(6),
+                            decoration: BoxDecoration(
+                              color: _purple.withOpacity(0.10),
+                              borderRadius: BorderRadius.circular(9),
+                            ),
+                            child: const Icon(
+                              Icons.storefront_rounded,
+                              color: _purple,
+                              size: 18,
+                            ),
+                          ),
+                          const SizedBox(width: 7),
+                          Text(
+                            "BOCK STORE",
+                            style: TextStyle(
+                              color: _textPrimary,
+                              fontWeight: FontWeight.w800,
+                              fontSize: 15,
+                              letterSpacing: 0.4,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                  // Search bar — fades + expands in from the right
+                  if (t > 0.0)
+                    Opacity(
+                      opacity: (t * 2 - 1).clamp(0.0, 1.0),
+                      child: Container(
+                        height: 36,
+                        margin: const EdgeInsets.only(right: 8),
+                        decoration: BoxDecoration(
+                          color: _isDarkMode
+                              ? const Color(0xFF2A2A2A)
+                              : const Color(0xFFF5FAF6),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: _isDarkMode
+                                ? const Color(0xFF3A3A3A)
+                                : const Color(0xFFE0EEE5),
+                          ),
+                        ),
+                        child: TextField(
+                          controller: _mobileSearchController,
+                          autofocus: t == 1.0,
+                          style: TextStyle(fontSize: 13, color: _textPrimary),
+                          decoration: InputDecoration(
+                            hintText: "Search apps...",
+                            hintStyle: TextStyle(
+                              color: _textSecondary.withOpacity(0.6),
+                              fontSize: 13,
+                            ),
+                            border: InputBorder.none,
+                            prefixIcon: const Icon(
+                              Icons.search_rounded,
+                              size: 16,
+                              color: _purple,
+                            ),
+                            contentPadding: const EdgeInsets.symmetric(
+                              vertical: 10,
+                            ),
+                          ),
+                          onChanged: _onSearchChanged,
+                        ),
+                      ),
+                    ),
+                ],
+              );
+            },
           ),
-          child: const Icon(Icons.storefront_rounded, color: _purple, size: 18),
-        ),
-        const SizedBox(width: 8),
-        Text(
-          "BOCK STORE",
-          style: TextStyle(
-            color: _textPrimary,
-            fontWeight: FontWeight.w800,
-            fontSize: 15,
-            letterSpacing: 0.4,
-          ),
-        ),
-        const SizedBox(width: 10),
-
-        // Search bar – takes remaining space
-        Expanded(child: _searchBar(height: 36)),
-
-        const SizedBox(width: 8),
-
-        // Dark / Light mode toggle
-        GestureDetector(
-          onTap: () => setState(() => _isDarkMode = !_isDarkMode),
-          child: Container(
-            padding: const EdgeInsets.all(7),
-            decoration: BoxDecoration(
-              color: _purple.withOpacity(0.08),
-              borderRadius: BorderRadius.circular(9),
-            ),
-            child: Icon(
-              _isDarkMode ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
-              color: _purple,
-              size: 18,
-            ),
-          ),
         ),
 
-        const SizedBox(width: 6),
-
-        // Help button
-        GestureDetector(
-          onTap: _showHelpDialog,
-          child: Container(
-            padding: const EdgeInsets.all(7),
-            decoration: BoxDecoration(
-              color: _purple.withOpacity(0.08),
-              borderRadius: BorderRadius.circular(9),
-            ),
-            child: const Icon(
-              Icons.help_outline_rounded,
-              color: _purple,
-              size: 18,
-            ),
-          ),
-        ),
+        // ── Right icons: always in place, never cause overflow ───────────────
+        rightIcons,
       ],
     );
   }
@@ -727,14 +853,68 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // ── Desktop grid (unchanged) ──────────────────────────────────────────────
+  // ── Desktop Sidebar ───────────────────────────────────────────────────────
+  Widget _buildDesktopSidebar() {
+    final items = [
+      (Icons.category_rounded, "Categories"),
+      (Icons.favorite_rounded, "Wishlist"),
+      (Icons.trending_up_rounded, "Most Downloaded"),
+      (Icons.person_rounded, "Profile"),
+    ];
+
+    return Container(
+      width: 240,
+      height: double.infinity,
+      decoration: BoxDecoration(
+        color: _cardBg,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 12,
+            offset: const Offset(2, 0),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SizedBox(height: 28),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Text(
+              "MENU",
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 1.6,
+                color: _textSecondary,
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          ...List.generate(items.length, (index) {
+            final (icon, label) = items[index];
+            return _SidebarItem(
+              icon: icon,
+              label: label,
+              isSelected: selectedIndex == index,
+              isDarkMode: _isDarkMode,
+              onTap: () => setState(() => selectedIndex = index),
+            );
+          }),
+        ],
+      ),
+    );
+  }
+
+  // ── Desktop grid ──────────────────────────────────────────────────────────
   Widget _buildDesktopGrid(double width) {
     return GridView.builder(
       padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 32),
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: width > 1500
+        crossAxisCount: width > 1260
             ? 5
-            : width > 1200
+            : width > 960
             ? 4
             : 3,
         crossAxisSpacing: 20,
@@ -1068,6 +1248,85 @@ class _HomeScreenState extends State<HomeScreen> {
           size: 20,
         ),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      ),
+    );
+  }
+}
+
+// ── Sidebar Item ─────────────────────────────────────────────────────────────
+class _SidebarItem extends StatefulWidget {
+  final IconData icon;
+  final String label;
+  final bool isSelected;
+  final bool isDarkMode;
+  final VoidCallback onTap;
+
+  const _SidebarItem({
+    required this.icon,
+    required this.label,
+    required this.isSelected,
+    required this.isDarkMode,
+    required this.onTap,
+  });
+
+  @override
+  State<_SidebarItem> createState() => _SidebarItemState();
+}
+
+class _SidebarItemState extends State<_SidebarItem> {
+  bool _hovered = false;
+  static const _purple = Color(0xFF6A1B9A);
+
+  @override
+  Widget build(BuildContext context) {
+    final Color bg = widget.isSelected
+        ? _purple
+        : _hovered
+        ? _purple.withOpacity(0.08)
+        : Colors.transparent;
+
+    final Color fgColor = widget.isSelected
+        ? Colors.white
+        : widget.isDarkMode
+        ? const Color(0xFFAAAAAA)
+        : const Color(0xFF1A1A1A);
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        onEnter: (_) => setState(() => _hovered = true),
+        onExit: (_) => setState(() => _hovered = false),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 160),
+          decoration: BoxDecoration(
+            color: bg,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(12),
+            onTap: widget.onTap,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              child: Row(
+                children: [
+                  Icon(widget.icon, color: fgColor, size: 20),
+                  const SizedBox(width: 12),
+                  Text(
+                    widget.label,
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: widget.isSelected
+                          ? FontWeight.w700
+                          : FontWeight.w500,
+                      color: fgColor,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }
