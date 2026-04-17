@@ -7,6 +7,7 @@ import '../models/app_model.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'dart:convert';
+import 'package:path/path.dart' as p;
 
 class AdminUploadScreen extends StatefulWidget {
   final AppModel? app;
@@ -17,6 +18,18 @@ class AdminUploadScreen extends StatefulWidget {
   State<AdminUploadScreen> createState() => _AdminUploadScreenState();
 }
 
+// Holds one file entry (picked file + editable metadata)
+class _FileEntry {
+  PlatformFile? platformFile;
+  String type;
+  TextEditingController labelCtrl;
+
+  _FileEntry({this.platformFile, required this.type, required String label})
+      : labelCtrl = TextEditingController(text: label);
+
+  void dispose() => labelCtrl.dispose();
+}
+
 class _AdminUploadScreenState extends State<AdminUploadScreen>
     with SingleTickerProviderStateMixin {
   final nameController = TextEditingController();
@@ -24,15 +37,15 @@ class _AdminUploadScreenState extends State<AdminUploadScreen>
   final versionController = TextEditingController();
   final sizeController = TextEditingController();
   final developerController = TextEditingController();
+  final developerBioController = TextEditingController(); // ← NEW
   final ratedForController = TextEditingController();
   final packageController = TextEditingController();
   String selectedCategory = "Productivity";
 
   PlatformFile? iconFile;
   List<PlatformFile> screenshotFiles = [];
-  PlatformFile? apkFile;
-  PlatformFile? windowsFile;
-  PlatformFile? linuxFile;
+
+  final List<_FileEntry> _fileEntries = [];
 
   bool uploading = false;
   bool get isEdit => widget.app != null;
@@ -43,14 +56,47 @@ class _AdminUploadScreenState extends State<AdminUploadScreen>
   late Animation<double> _fadeAnim;
   late Animation<Offset> _slideAnim;
 
+  // ── Helpers ────────────────────────────────────────────────────────────────
+
+  static String _detectType(String filename) {
+    final ext = p.extension(filename).toLowerCase().replaceFirst('.', '');
+    const map = {
+      'apk': 'apk',
+      'exe': 'exe',
+      'msi': 'exe',
+      'sh': 'sh',
+      'deb': 'deb',
+      'rpm': 'rpm',
+      'appimage': 'appimage',
+      'dmg': 'dmg',
+      'zip': 'zip',
+    };
+    return map[ext] ?? 'other';
+  }
+
+  static String _defaultLabel(String type) {
+    const map = {
+      'apk': 'Android APK',
+      'exe': 'Windows Installer',
+      'sh': 'Linux Shell Script',
+      'deb': 'Linux Package (.deb)',
+      'rpm': 'Linux Package (.rpm)',
+      'appimage': 'Linux AppImage',
+      'dmg': 'macOS Installer',
+      'zip': 'ZIP Archive',
+    };
+    return map[type] ?? 'Download';
+  }
+
+  // ── Lifecycle ──────────────────────────────────────────────────────────────
+
   @override
   void initState() {
     super.initState();
     _animCtrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 600),
-    );
-    _fadeAnim = CurvedAnimation(parent: _animCtrl, curve: Curves.easeOut);
+        vsync: this, duration: const Duration(milliseconds: 600));
+    _fadeAnim =
+        CurvedAnimation(parent: _animCtrl, curve: Curves.easeOut);
     _slideAnim = Tween<Offset>(
       begin: const Offset(0, 0.05),
       end: Offset.zero,
@@ -58,13 +104,22 @@ class _AdminUploadScreenState extends State<AdminUploadScreen>
     _animCtrl.forward();
 
     if (isEdit) {
-      nameController.text = widget.app!.name;
-      descController.text = widget.app!.description;
-      versionController.text = widget.app!.version ?? "";
-      sizeController.text = widget.app!.size ?? "";
-      developerController.text = widget.app!.developer ?? "";
-      ratedForController.text = widget.app!.ratedFor ?? "";
-      packageController.text = widget.app!.packageName;
+      final app = widget.app!;
+      nameController.text = app.name;
+      descController.text = app.description;
+      versionController.text = app.version ?? '';
+      sizeController.text = app.size ?? '';
+      developerController.text = app.developer ?? '';
+      ratedForController.text = app.ratedFor ?? '';
+      packageController.text = app.packageName;
+
+      for (final f in app.files) {
+        final type = f['type'] as String? ?? 'other';
+        _fileEntries.add(_FileEntry(
+          type: type,
+          label: f['label'] as String? ?? _defaultLabel(type),
+        ));
+      }
     }
   }
 
@@ -75,63 +130,62 @@ class _AdminUploadScreenState extends State<AdminUploadScreen>
     versionController.dispose();
     sizeController.dispose();
     developerController.dispose();
+    developerBioController.dispose(); // ← NEW
     ratedForController.dispose();
     packageController.dispose();
     _animCtrl.dispose();
+    for (final e in _fileEntries) {
+      e.dispose();
+    }
     super.dispose();
   }
 
+  // ── File picking ───────────────────────────────────────────────────────────
+
   Future<void> pickIcon() async {
-    final result = await FilePicker.platform.pickFiles(
-      type: FileType.image,
-      withData: true,
-    );
-    if (result != null) setState(() => iconFile = result.files.first);
+    final r = await FilePicker.platform
+        .pickFiles(type: FileType.image, withData: true);
+    if (r != null) setState(() => iconFile = r.files.first);
   }
 
   Future<void> pickScreenshots() async {
-    final result = await FilePicker.platform.pickFiles(
-      allowMultiple: true,
-      type: FileType.image,
-      withData: true,
-    );
-    if (result != null && result.files.isNotEmpty) {
-      setState(() => screenshotFiles = result.files);
+    final r = await FilePicker.platform.pickFiles(
+        allowMultiple: true, type: FileType.image, withData: true);
+    if (r != null && r.files.isNotEmpty) {
+      setState(() => screenshotFiles = r.files);
     }
   }
 
-  Future<void> pickApk() async {
-    final result = await FilePicker.platform.pickFiles(
+  Future<void> _pickFileForEntry(int index) async {
+    final r = await FilePicker.platform.pickFiles(
       type: FileType.custom,
-      allowedExtensions: ['apk'],
+      allowedExtensions: [
+        'apk', 'exe', 'msi', 'sh', 'deb', 'rpm', 'appimage', 'dmg', 'zip',
+      ],
       withData: true,
     );
-    if (result != null) setState(() => apkFile = result.files.first);
+    if (r == null) return;
+    final file = r.files.first;
+    final type = _detectType(file.name);
+    setState(() {
+      _fileEntries[index].platformFile = file;
+      _fileEntries[index].type = type;
+      final label = _fileEntries[index].labelCtrl.text.trim();
+      if (label.isEmpty || label == 'Download') {
+        _fileEntries[index].labelCtrl.text = _defaultLabel(type);
+      }
+    });
   }
 
-  Future<void> pickWindowsFile() async {
-    final result = await FilePicker.platform.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: ['exe'],
-      withData: true,
-    );
+  void _addFileEntry() =>
+      setState(() => _fileEntries.add(_FileEntry(type: 'other', label: '')));
 
-    if (result != null) {
-      setState(() => windowsFile = result.files.first);
-    }
+  void _removeFileEntry(int index) {
+    _fileEntries[index].dispose();
+    setState(() => _fileEntries.removeAt(index));
   }
 
-  Future<void> pickLinuxFile() async {
-    final result = await FilePicker.platform.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: ['deb', 'appimage'],
-      withData: true,
-    );
-
-    if (result != null) {
-      setState(() => linuxFile = result.files.first);
-    }
-  }
+  // ── Submit ─────────────────────────────────────────────────────────────────
 
   Future<void> submit() async {
     final auth = context.read<AuthProvider>();
@@ -139,12 +193,10 @@ class _AdminUploadScreenState extends State<AdminUploadScreen>
     if (token == null) return;
 
     if (packageController.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Package name is required"),
-          backgroundColor: Color(0xFFE53935),
-        ),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text("Package name is required"),
+        backgroundColor: Color(0xFFE53935),
+      ));
       return;
     }
 
@@ -165,86 +217,46 @@ class _AdminUploadScreenState extends State<AdminUploadScreen>
     request.fields["developer"] = developerController.text;
     request.fields["rated_for"] = ratedForController.text;
     request.fields["package_name"] = packageController.text;
-    if (!isEdit) {
-      request.fields["version_code"] = "1";
-    }
+    request.fields["bio"] = developerBioController.text; // ← NEW
+    if (!isEdit) request.fields["version_code"] = "1";
 
+    // Icon
     if (iconFile != null) {
       if (kIsWeb) {
-        request.files.add(
-          http.MultipartFile.fromBytes(
-            "icon",
-            iconFile!.bytes!,
-            filename: iconFile!.name,
-          ),
-        );
+        request.files.add(http.MultipartFile.fromBytes(
+            "icon", iconFile!.bytes!, filename: iconFile!.name));
       } else {
-        request.files.add(
-          await http.MultipartFile.fromPath("icon", iconFile!.path!),
-        );
+        request.files
+            .add(await http.MultipartFile.fromPath("icon", iconFile!.path!));
       }
     }
 
-    for (final file in screenshotFiles) {
+    // Screenshots
+    for (final f in screenshotFiles) {
       if (kIsWeb) {
-        request.files.add(
-          http.MultipartFile.fromBytes(
-            "screenshots",
-            file.bytes!,
-            filename: file.name,
-          ),
-        );
+        request.files.add(http.MultipartFile.fromBytes(
+            "screenshots", f.bytes!, filename: f.name));
       } else {
         request.files.add(
-          await http.MultipartFile.fromPath("screenshots", file.path!),
-        );
+            await http.MultipartFile.fromPath("screenshots", f.path!));
       }
     }
 
-    if (apkFile != null) {
-      if (kIsWeb) {
-        request.files.add(
-          http.MultipartFile.fromBytes(
-            "apk",
-            apkFile!.bytes!,
-            filename: apkFile!.name,
-          ),
-        );
-      } else {
-        request.files.add(
-          await http.MultipartFile.fromPath("apk", apkFile!.path!),
-        );
-      }
-    }
-    if (windowsFile != null) {
-      if (kIsWeb) {
-        request.files.add(
-          http.MultipartFile.fromBytes(
-            "windows",
-            windowsFile!.bytes!,
-            filename: windowsFile!.name,
-          ),
-        );
-      } else {
-        request.files.add(
-          await http.MultipartFile.fromPath("windows", windowsFile!.path!),
-        );
-      }
-    }
+    // Dynamic files
+    for (int i = 0; i < _fileEntries.length; i++) {
+      final entry = _fileEntries[i];
+      request.fields["file_labels[$i]"] = entry.labelCtrl.text.trim();
+      request.fields["file_types[$i]"] = entry.type;
 
-    if (linuxFile != null) {
-      if (kIsWeb) {
-        request.files.add(
-          http.MultipartFile.fromBytes(
-            "linux",
-            linuxFile!.bytes!,
-            filename: linuxFile!.name,
-          ),
-        );
-      } else {
-        request.files.add(
-          await http.MultipartFile.fromPath("linux", linuxFile!.path!),
-        );
+      if (entry.platformFile != null) {
+        if (kIsWeb) {
+          request.files.add(http.MultipartFile.fromBytes(
+              "files", entry.platformFile!.bytes!,
+              filename: entry.platformFile!.name));
+        } else {
+          request.files.add(await http.MultipartFile.fromPath(
+              "files", entry.platformFile!.path!));
+        }
       }
     }
 
@@ -255,14 +267,12 @@ class _AdminUploadScreenState extends State<AdminUploadScreen>
     if (!mounted) return;
 
     if (response.statusCode == 200 || response.statusCode == 201) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            isEdit ? "App updated successfully" : "App uploaded successfully",
-          ),
-          backgroundColor: _purple,
-        ),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(isEdit
+            ? "App updated successfully"
+            : "App uploaded successfully"),
+        backgroundColor: _purple,
+      ));
       Navigator.pop(context, true);
     } else {
       String message = "Operation failed";
@@ -270,14 +280,14 @@ class _AdminUploadScreenState extends State<AdminUploadScreen>
         final data = json.decode(responseBody);
         message = data["error"] ?? message;
       } catch (_) {}
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(message),
-          backgroundColor: const Color(0xFFE53935),
-        ),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(message),
+        backgroundColor: const Color(0xFFE53935),
+      ));
     }
   }
+
+  // ── Build ──────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
@@ -290,51 +300,47 @@ class _AdminUploadScreenState extends State<AdminUploadScreen>
         elevation: 0,
         surfaceTintColor: Colors.white,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_rounded, color: Color(0xFF1A1A1A)),
+          icon: const Icon(Icons.arrow_back_rounded,
+              color: Color(0xFF1A1A1A)),
           onPressed: () => Navigator.pop(context),
         ),
-        title: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(7),
-              decoration: BoxDecoration(
-                color: _purple..withValues(alpha: 0.10),
-                borderRadius: BorderRadius.circular(9),
-              ),
-              child: Icon(
-                isEdit ? Icons.edit_rounded : Icons.cloud_upload_rounded,
-                color: _purple,
-                size: 18,
-              ),
+        title: Row(children: [
+          Container(
+            padding: const EdgeInsets.all(7),
+            decoration: BoxDecoration(
+              color: _purple.withValues(alpha: 0.10),
+              borderRadius: BorderRadius.circular(9),
             ),
-            const SizedBox(width: 10),
-            Text(
-              isEdit ? "Edit App" : "Upload App",
-              style: const TextStyle(
+            child: Icon(
+              isEdit ? Icons.edit_rounded : Icons.cloud_upload_rounded,
+              color: _purple,
+              size: 18,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Text(
+            isEdit ? "Edit App" : "Upload App",
+            style: const TextStyle(
                 color: Color(0xFF1A1A1A),
                 fontWeight: FontWeight.w700,
-                fontSize: 18,
-              ),
+                fontSize: 18),
+          ),
+          const SizedBox(width: 8),
+          Container(
+            padding:
+                const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            decoration: BoxDecoration(
+              color: const Color(0xFFE8F5E9),
+              borderRadius: BorderRadius.circular(6),
             ),
-            const SizedBox(width: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-              decoration: BoxDecoration(
-                color: const Color(0xFFE8F5E9),
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: const Text(
-                "ADMIN",
+            child: const Text("ADMIN",
                 style: TextStyle(
-                  color: _purple,
-                  fontSize: 10,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: 0.5,
-                ),
-              ),
-            ),
-          ],
-        ),
+                    color: _purple,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.5)),
+          ),
+        ]),
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(1),
           child: Divider(height: 1, color: Colors.grey.shade100),
@@ -342,7 +348,8 @@ class _AdminUploadScreenState extends State<AdminUploadScreen>
       ),
       body: Center(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+          padding:
+              const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
           child: FadeTransition(
             opacity: _fadeAnim,
             child: SlideTransition(
@@ -354,15 +361,13 @@ class _AdminUploadScreenState extends State<AdminUploadScreen>
                   borderRadius: BorderRadius.circular(24),
                   boxShadow: [
                     BoxShadow(
-                      blurRadius: 30,
-                      offset: const Offset(0, 10),
-                      color: _purple..withValues(alpha: 0.07),
-                    ),
+                        blurRadius: 30,
+                        offset: const Offset(0, 10),
+                        color: _purple.withValues(alpha: 0.07)),
                     BoxShadow(
-                      blurRadius: 16,
-                      offset: const Offset(0, 4),
-                      color: Colors.black..withValues(alpha: 0.05),
-                    ),
+                        blurRadius: 16,
+                        offset: const Offset(0, 4),
+                        color: Colors.black.withValues(alpha: 0.05)),
                   ],
                 ),
                 child: Column(
@@ -372,15 +377,10 @@ class _AdminUploadScreenState extends State<AdminUploadScreen>
                     Container(
                       width: double.infinity,
                       padding: const EdgeInsets.symmetric(
-                        horizontal: 28,
-                        vertical: 22,
-                      ),
+                          horizontal: 28, vertical: 22),
                       decoration: const BoxDecoration(
                         gradient: LinearGradient(
-                          colors: [
-                            Color(0xFF6A1B9A), // main purple
-                            Color(0xFF4A148C), // darker purple
-                          ],
+                          colors: [Color(0xFF6A1B9A), Color(0xFF4A148C)],
                           begin: Alignment.topLeft,
                           end: Alignment.bottomRight,
                         ),
@@ -394,9 +394,8 @@ class _AdminUploadScreenState extends State<AdminUploadScreen>
                             ? "Update the app details below"
                             : "Fill in the app details to publish",
                         style: TextStyle(
-                          color: Colors.white..withValues(alpha: 0.92),
-                          fontSize: 13,
-                        ),
+                            color: Colors.white.withValues(alpha: 0.92),
+                            fontSize: 13),
                       ),
                     ),
 
@@ -405,72 +404,65 @@ class _AdminUploadScreenState extends State<AdminUploadScreen>
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // ── App Info section ────────────────────────
+                          // ── App Info ──────────────────────────────
                           _sectionHeader(
-                            Icons.info_outline_rounded,
-                            "App Info",
-                          ),
+                              Icons.info_outline_rounded, "App Info"),
                           const SizedBox(height: 16),
-
                           _buildLabel("App Name"),
                           const SizedBox(height: 8),
-                          _buildField(
-                            nameController,
-                            "provide a name for the app",
-                          ),
+                          _buildField(nameController,
+                              "Provide a name for the app"),
                           const SizedBox(height: 18),
-
                           _buildLabel("Description"),
                           const SizedBox(height: 8),
-                          _buildField(
-                            descController,
-                            "Describe what the app does...",
-                            maxLines: 3,
-                          ),
+                          _buildField(descController,
+                              "Describe what the app does...",
+                              maxLines: 3),
                           const SizedBox(height: 18),
-
-                          Row(
-                            children: [
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
+                          Row(children: [
+                            Expanded(
+                              child: Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.start,
                                   children: [
                                     _buildLabel("Version"),
                                     const SizedBox(height: 8),
                                     _buildField(
-                                      versionController,
-                                      "e.g. 1.0.0",
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              const SizedBox(width: 16),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                        versionController, "e.g. 1.0.0"),
+                                  ]),
+                            ),
+                            const SizedBox(width: 16),
+                            Expanded(
+                              child: Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.start,
                                   children: [
                                     _buildLabel("Size"),
                                     const SizedBox(height: 8),
                                     _buildField(
-                                      sizeController,
-                                      "enter size with unit",
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          ),
+                                        sizeController, "e.g. 24 MB"),
+                                  ]),
+                            ),
+                          ]),
                           const SizedBox(height: 18),
-
                           _buildLabel("Developer"),
                           const SizedBox(height: 8),
-                          _buildField(developerController, "e.g. Acme Corp"),
-                          const SizedBox(height: 18),
-                          const SizedBox(height: 18),
+                          _buildField(
+                              developerController, "e.g. Acme Corp"),
 
+                          // ── Developer Bio (NEW) ───────────────────
+                          const SizedBox(height: 18),
+                          _buildLabel("Developer Bio"),
+                          const SizedBox(height: 8),
+                          _buildField(
+                            developerBioController,
+                            "Short bio about the developer...",
+                            maxLines: 3,
+                          ),
+
+                          const SizedBox(height: 18),
                           _buildLabel("Category"),
                           const SizedBox(height: 8),
-
                           DropdownButtonFormField<String>(
                             value: selectedCategory,
                             decoration: InputDecoration(
@@ -479,129 +471,114 @@ class _AdminUploadScreenState extends State<AdminUploadScreen>
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12),
                                 borderSide: BorderSide(
-                                  color: Colors.grey.shade200,
-                                ),
+                                    color: Colors.grey.shade200),
                               ),
                             ),
-                            items:
-                                [
-                                  "Productivity",
-                                  "Tools",
-                                  "Education",
-                                  "Utility",
-                                  "Social",
-                                ].map((category) {
-                                  return DropdownMenuItem<String>(
-                                    value: category,
-                                    child: Text(category),
-                                  );
-                                }).toList(),
-                            onChanged: (value) {
-                              setState(() {
-                                selectedCategory = value!;
-                              });
-                            },
+                            items: [
+                              "Productivity",
+                              "Tools",
+                              "Education",
+                              "Utility",
+                              "Social"
+                            ]
+                                .map((c) => DropdownMenuItem(
+                                    value: c, child: Text(c)))
+                                .toList(),
+                            onChanged: (v) =>
+                                setState(() => selectedCategory = v!),
                           ),
-
-                          Row(
-                            children: [
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
+                          const SizedBox(height: 18),
+                          Row(children: [
+                            Expanded(
+                              child: Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.start,
                                   children: [
                                     _buildLabel("Rated For"),
                                     const SizedBox(height: 8),
                                     _buildField(
-                                      ratedForController,
-                                      "e.g. 3+, 12+",
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              const SizedBox(width: 16),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                        ratedForController, "e.g. 3+, 12+"),
+                                  ]),
+                            ),
+                            const SizedBox(width: 16),
+                            Expanded(
+                              child: Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.start,
                                   children: [
                                     _buildLabel("Package Name *"),
                                     const SizedBox(height: 8),
-                                    _buildField(
-                                      packageController,
-                                      "enter the package name (unique identifier)",
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          ),
+                                    _buildField(packageController,
+                                        "Unique identifier"),
+                                  ]),
+                            ),
+                          ]),
 
                           const SizedBox(height: 32),
                           Divider(color: Colors.grey.shade100),
                           const SizedBox(height: 24),
 
-                          // ── Assets section ───────────────────────────
-                          _sectionHeader(Icons.perm_media_rounded, "Assets"),
+                          // ── Assets ────────────────────────────────
+                          _sectionHeader(
+                              Icons.perm_media_rounded, "Assets"),
+                          const SizedBox(height: 16),
+                          Row(children: [
+                            Expanded(
+                              child: _assetButton(
+                                icon: Icons.image_rounded,
+                                label: "Pick Icon",
+                                onPressed: uploading ? null : pickIcon,
+                                selected: iconFile != null,
+                                selectedLabel: "Icon selected",
+                              ),
+                            ),
+                            const SizedBox(width: 14),
+                            Expanded(
+                              child: _assetButton(
+                                icon: Icons.photo_library_rounded,
+                                label: "Pick Screenshots",
+                                onPressed:
+                                    uploading ? null : pickScreenshots,
+                                selected: screenshotFiles.isNotEmpty,
+                                selectedLabel:
+                                    "${screenshotFiles.length} selected",
+                              ),
+                            ),
+                          ]),
+
+                          const SizedBox(height: 32),
+                          Divider(color: Colors.grey.shade100),
+                          const SizedBox(height: 24),
+
+                          // ── Downloadable Files ────────────────────
+                          _sectionHeader(Icons.folder_zip_outlined,
+                              "Downloadable Files"),
                           const SizedBox(height: 16),
 
-                          Row(
-                            children: [
-                              Expanded(
-                                child: _assetButton(
-                                  icon: Icons.image_rounded,
-                                  label: "Pick Icon",
-                                  onPressed: uploading ? null : pickIcon,
-                                  selected: iconFile != null,
-                                  selectedLabel: "Icon selected",
-                                ),
-                              ),
-                              const SizedBox(width: 14),
-                              Expanded(
-                                child: _assetButton(
-                                  icon: Icons.photo_library_rounded,
-                                  label: "Pick Screenshots",
-                                  onPressed: uploading ? null : pickScreenshots,
-                                  selected: screenshotFiles.isNotEmpty,
-                                  selectedLabel:
-                                      "${screenshotFiles.length} selected",
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 14),
-                          _assetButton(
-                            icon: Icons.android_rounded,
-                            label: "Pick APK File",
-                            onPressed: uploading ? null : pickApk,
-                            selected: apkFile != null,
-                            selectedLabel: apkFile?.name ?? "APK selected",
-                            fullWidth: true,
-                          ),
-                          const SizedBox(height: 14),
+                          ..._fileEntries.asMap().entries.map(
+                              (e) => _buildFileEntryCard(e.key, e.value)),
 
-                          _assetButton(
-                            icon: Icons.window,
-                            label: "Pick Windows (.exe)",
-                            onPressed: uploading ? null : pickWindowsFile,
-                            selected: windowsFile != null,
-                            selectedLabel:
-                                windowsFile?.name ?? "Windows selected",
-                            fullWidth: true,
-                          ),
-
-                          const SizedBox(height: 14),
-
-                          _assetButton(
-                            icon: Icons.code,
-                            label: "Pick Linux (.deb/.appimage)",
-                            onPressed: uploading ? null : pickLinuxFile,
-                            selected: linuxFile != null,
-                            selectedLabel: linuxFile?.name ?? "Linux selected",
-                            fullWidth: true,
+                          OutlinedButton.icon(
+                            onPressed: uploading ? null : _addFileEntry,
+                            icon: const Icon(Icons.add_rounded, size: 18),
+                            label: const Text("Add File",
+                                style: TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600)),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: _purple,
+                              side: BorderSide(
+                                  color: _purple.withValues(alpha: 0.4)),
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12)),
+                              padding: const EdgeInsets.symmetric(
+                                  vertical: 12, horizontal: 20),
+                            ),
                           ),
 
                           const SizedBox(height: 32),
 
-                          // ── Submit ───────────────────────────────────
+                          // ── Submit ────────────────────────────────
                           SizedBox(
                             width: double.infinity,
                             height: 52,
@@ -610,23 +587,21 @@ class _AdminUploadScreenState extends State<AdminUploadScreen>
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: _purple,
                                 foregroundColor: Colors.white,
-                                disabledBackgroundColor: _purple.withValues(
-                                  alpha: 0.5,
-                                ),
+                                disabledBackgroundColor:
+                                    _purple.withValues(alpha: 0.5),
                                 elevation: 0,
                                 shadowColor: Colors.transparent,
                                 shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(14),
-                                ),
+                                    borderRadius:
+                                        BorderRadius.circular(14)),
                               ),
                               child: uploading
                                   ? const SizedBox(
                                       height: 22,
                                       width: 22,
                                       child: CircularProgressIndicator(
-                                        strokeWidth: 2.5,
-                                        color: Colors.white,
-                                      ),
+                                          strokeWidth: 2.5,
+                                          color: Colors.white),
                                     )
                                   : Row(
                                       mainAxisAlignment:
@@ -644,10 +619,9 @@ class _AdminUploadScreenState extends State<AdminUploadScreen>
                                               ? "Save Changes"
                                               : "Publish App",
                                           style: const TextStyle(
-                                            fontSize: 16,
-                                            fontWeight: FontWeight.w700,
-                                            letterSpacing: 0.3,
-                                          ),
+                                              fontSize: 16,
+                                              fontWeight: FontWeight.w700,
+                                              letterSpacing: 0.3),
                                         ),
                                       ],
                                     ),
@@ -666,60 +640,172 @@ class _AdminUploadScreenState extends State<AdminUploadScreen>
     );
   }
 
-  Widget _sectionHeader(IconData icon, String label) {
-    return Row(
-      children: [
-        Container(
-          padding: const EdgeInsets.all(7),
-          decoration: BoxDecoration(
-            color: const Color(0xFF6A1B9A).withValues(alpha: 0.10),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Icon(icon, color: const Color(0xFF6A1B9A), size: 16),
-        ),
-        const SizedBox(width: 10),
-        Text(
-          label,
-          style: const TextStyle(
-            fontSize: 15,
-            fontWeight: FontWeight.w700,
-            color: Color(0xFF1A1A1A),
-          ),
-        ),
-      ],
-    );
-  }
+  // ── File entry card ────────────────────────────────────────────────────────
 
-  Widget _buildLabel(String text) {
-    return Text(
-      text,
-      style: const TextStyle(
-        fontSize: 13,
-        fontWeight: FontWeight.w600,
-        color: Color(0xFF424242),
-        letterSpacing: 0.2,
+  Widget _buildFileEntryCard(int index, _FileEntry entry) {
+    final hasFile = entry.platformFile != null;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF5FAF6),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: hasFile
+              ? _purple.withValues(alpha: 0.25)
+              : Colors.grey.shade200,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed:
+                    uploading ? null : () => _pickFileForEntry(index),
+                icon: Icon(
+                  hasFile
+                      ? Icons.check_circle_rounded
+                      : Icons.attach_file_rounded,
+                  size: 16,
+                  color: hasFile ? _purple : Colors.grey.shade500,
+                ),
+                label: Text(
+                  hasFile ? (entry.platformFile!.name) : "Choose file",
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: hasFile ? _purple : Colors.grey.shade600,
+                  ),
+                ),
+                style: OutlinedButton.styleFrom(
+                  backgroundColor: hasFile
+                      ? _purple.withValues(alpha: 0.05)
+                      : Colors.white,
+                  side: BorderSide(
+                    color: hasFile
+                        ? _purple.withValues(alpha: 0.4)
+                        : Colors.grey.shade300,
+                  ),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10)),
+                  padding: const EdgeInsets.symmetric(
+                      vertical: 10, horizontal: 12),
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Container(
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: _purple.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                entry.type.toUpperCase(),
+                style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: _purple),
+              ),
+            ),
+            const SizedBox(width: 8),
+            GestureDetector(
+              onTap: uploading ? null : () => _removeFileEntry(index),
+              child: Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: Colors.red.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(Icons.close_rounded,
+                    size: 16, color: Colors.red.shade400),
+              ),
+            ),
+          ]),
+          const SizedBox(height: 10),
+          TextField(
+            controller: entry.labelCtrl,
+            style: const TextStyle(
+                fontSize: 13, fontWeight: FontWeight.w500),
+            decoration: InputDecoration(
+              hintText: "Label  (e.g. Android APK, Windows Installer)",
+              hintStyle: TextStyle(
+                  color: Colors.grey.shade400, fontSize: 13),
+              filled: true,
+              fillColor: Colors.white,
+              isDense: true,
+              contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 12, vertical: 10),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: BorderSide(color: Colors.grey.shade200),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: BorderSide(color: Colors.grey.shade200),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide:
+                    const BorderSide(color: _purple, width: 1.5),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
 
-  Widget _buildField(
-    TextEditingController ctrl,
-    String hint, {
-    int maxLines = 1,
-  }) {
+  // ── Shared UI helpers ──────────────────────────────────────────────────────
+
+  Widget _sectionHeader(IconData icon, String label) {
+    return Row(children: [
+      Container(
+        padding: const EdgeInsets.all(7),
+        decoration: BoxDecoration(
+          color: const Color(0xFF6A1B9A).withValues(alpha: 0.10),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Icon(icon, color: const Color(0xFF6A1B9A), size: 16),
+      ),
+      const SizedBox(width: 10),
+      Text(label,
+          style: const TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w700,
+              color: Color(0xFF1A1A1A))),
+    ]);
+  }
+
+  Widget _buildLabel(String text) {
+    return Text(text,
+        style: const TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            color: Color(0xFF424242),
+            letterSpacing: 0.2));
+  }
+
+  Widget _buildField(TextEditingController ctrl, String hint,
+      {int maxLines = 1}) {
     return TextField(
       controller: ctrl,
       maxLines: maxLines,
-      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+      style:
+          const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
       decoration: InputDecoration(
         hintText: hint,
-        hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 14),
+        hintStyle:
+            TextStyle(color: Colors.grey.shade400, fontSize: 14),
         filled: true,
         fillColor: const Color(0xFFF5FAF6),
         contentPadding: const EdgeInsets.symmetric(
-          horizontal: 16,
-          vertical: 13,
-        ),
+            horizontal: 16, vertical: 13),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
           borderSide: BorderSide(color: Colors.grey.shade200),
@@ -730,7 +816,8 @@ class _AdminUploadScreenState extends State<AdminUploadScreen>
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: Color(0xFF6A1B9A), width: 1.8),
+          borderSide: const BorderSide(
+              color: Color(0xFF6A1B9A), width: 1.8),
         ),
       ),
     );
@@ -762,9 +849,9 @@ class _AdminUploadScreenState extends State<AdminUploadScreen>
             width: selected ? 1.5 : 1,
           ),
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-          padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+              borderRadius: BorderRadius.circular(12)),
+          padding: const EdgeInsets.symmetric(
+              vertical: 14, horizontal: 16),
         ),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -772,7 +859,9 @@ class _AdminUploadScreenState extends State<AdminUploadScreen>
             Icon(
               selected ? Icons.check_circle_rounded : icon,
               size: 18,
-              color: selected ? const Color(0xFF6A1B9A) : Colors.grey.shade500,
+              color: selected
+                  ? const Color(0xFF6A1B9A)
+                  : Colors.grey.shade500,
             ),
             const SizedBox(width: 8),
             Flexible(

@@ -4,6 +4,7 @@ import '../providers/auth_provider.dart';
 import '../services/api_service.dart';
 import '../models/app_model.dart';
 import '../config/api_config.dart';
+import '../config/url_helper.dart';
 import 'app_detail_screen.dart';
 
 class MyAppsScreen extends StatefulWidget {
@@ -141,7 +142,8 @@ class _MyAppsScreenState extends State<MyAppsScreen>
                         onTap: () => Navigator.push(
                           context,
                           MaterialPageRoute(
-                            builder: (_) => AppDetailScreen(app: app),
+                            builder: (_) =>
+                                AppDetailScreen(app: app, allApps: apps),
                           ),
                         ),
                         child: Padding(
@@ -152,11 +154,11 @@ class _MyAppsScreenState extends State<MyAppsScreen>
                               ClipRRect(
                                 borderRadius: BorderRadius.circular(14),
                                 child: Image.network(
-                                  "${ApiConfig.baseUrl}${app.iconUrl}",
+                                  getFullUrl(app.iconUrl),
                                   width: 58,
                                   height: 58,
                                   fit: BoxFit.cover,
-                                  errorBuilder: (_, _, _) => Container(
+                                  errorBuilder: (_, __, ___) => Container(
                                     width: 58,
                                     height: 58,
                                     decoration: BoxDecoration(

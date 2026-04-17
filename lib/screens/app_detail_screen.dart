@@ -4,19 +4,31 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
+import 'package:share_plus/share_plus.dart';
 import '../models/app_model.dart';
 import '../models/rating_model.dart';
 import '../services/rating_service.dart';
 import '../providers/auth_provider.dart';
 import 'admin_upload_screen.dart';
+import 'developer_screen.dart';
 import 'package:play_store_app/config/api_config.dart';
+import 'package:play_store_app/config/url_helper.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:play_store_app/widgets/manage_versions_sheet.dart';
 
 class AppDetailScreen extends StatefulWidget {
   final AppModel app;
 
-  const AppDetailScreen({super.key, required this.app});
+  /// Pass the full app list so DeveloperScreen can filter without an API call.
+  /// If omitted, the developer name is still shown but tapping opens an empty list.
+  final List<AppModel> allApps;
+
+  const AppDetailScreen({
+    super.key,
+    required this.app,
+    this.allApps = const [],
+  });
 
   @override
   State<AppDetailScreen> createState() => _AppDetailScreenState();
@@ -56,6 +68,29 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
   void dispose() {
     reviewController.dispose();
     super.dispose();
+  }
+
+  // ── Share ──────────────────────────────────────────────────────────────────
+  void _shareApp() {
+    final appName = currentApp.name;
+    final message =
+        'Check out this app: $appName on Bock Store\n'
+        'App ID: ${currentApp.id}';
+    Share.share(message, subject: appName);
+  }
+
+  // ── Developer tap ──────────────────────────────────────────────────────────
+  void _openDeveloperScreen() {
+    final developer = currentApp.developer;
+    if (developer == null || developer.trim().isEmpty) return;
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) =>
+            DeveloperScreen(developerName: developer, allApps: widget.allApps),
+      ),
+    );
   }
 
   Future<void> _confirmDelete() async {
@@ -127,7 +162,7 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
     );
 
     if (response.statusCode == 200) {
-      await fetchAppDetails(); // VERY IMPORTANT
+      await fetchAppDetails();
     } else {
       ScaffoldMessenger.of(
         context,
@@ -178,7 +213,7 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
             }
           }
           screenshots = (data["screenshots"] as List)
-              .map((e) => "${ApiConfig.baseUrl}$e")
+              .map((e) => getFullUrl(e as String))
               .toList();
           loadingScreenshots = false;
         });
@@ -192,88 +227,207 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
     }
   }
 
-  Future<void> installApp() async {
-    if (isDownloading) return;
+  // ── Open a download URL ────────────────────────────────────────────────────
+  Future<void> _launchDownloadUrl(String url) async {
+    final uri = Uri.parse(url);
+    final launched = kIsWeb
+        ? await launchUrl(uri, mode: LaunchMode.platformDefault)
+        : await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!launched && mounted) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text("Download failed")));
+    }
+  }
 
-    setState(() => isDownloading = true);
-
+  // ── Download a single file entry from currentApp.files ────────────────────
+  Future<void> _downloadFile(Map<String, dynamic> file) async {
     final auth = context.read<AuthProvider>();
+    final fileId = file['id'];
+
+    final String query = fileId != null
+        ? 'file_id=$fileId'
+        : 'platform=${_typeToLegacyPlatform(file['type'] ?? '')}';
 
     try {
       final response = await http.get(
         Uri.parse(
-          "${ApiConfig.baseUrl}/api/apps/${currentApp.id}/download?platform=android",
+          "${ApiConfig.baseUrl}/api/apps/${currentApp.id}/download?$query",
         ),
         headers: {"Authorization": "Bearer ${auth.token}"},
       );
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        final downloadUrl = data["download_url"];
-
-        final uri = Uri.parse(downloadUrl);
-
-        bool launched;
-
-        if (kIsWeb) {
-          launched = await launchUrl(uri, mode: LaunchMode.platformDefault);
-        } else {
-          launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
-        }
-
-        if (!launched && mounted) {
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(const SnackBar(content: Text("Download failed")));
-        } else {
-          await fetchAppDetails();
-        }
+        await _launchDownloadUrl(data["download_url"]);
+        await fetchAppDetails();
       } else {
         throw Exception("Download API failed");
       }
     } catch (e) {
-      print("Download error: $e");
-
       if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(const SnackBar(content: Text("Download failed")));
       }
     }
-
-    setState(() => isDownloading = false);
   }
 
-  Future<void> downloadFile(String platform) async {
-    final auth = context.read<AuthProvider>();
-
-    try {
-      final response = await http.get(
-        Uri.parse(
-          "${ApiConfig.baseUrl}/api/apps/${currentApp.id}/download?platform=$platform",
-        ),
-        headers: {"Authorization": "Bearer ${auth.token}"},
-      );
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        final url = data["download_url"];
-
-        final uri = Uri.parse(url);
-
-        if (kIsWeb) {
-          await launchUrl(uri, mode: LaunchMode.platformDefault);
-        } else {
-          await launchUrl(uri, mode: LaunchMode.externalApplication);
-        }
-      } else {
-        throw Exception("Download failed");
-      }
-    } catch (e) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text("Download failed")));
+  String _typeToLegacyPlatform(String type) {
+    switch (type) {
+      case 'exe':
+        return 'windows';
+      case 'sh':
+      case 'deb':
+      case 'rpm':
+        return 'linux';
+      default:
+        return 'android';
     }
+  }
+
+  // ── Install / Update button handler ───────────────────────────────────────
+  Future<void> _handleInstallTap() async {
+    if (isDownloading) return;
+
+    final files = currentApp.files;
+    if (files.isEmpty) return;
+
+    if (files.length == 1) {
+      setState(() => isDownloading = true);
+      await _downloadFile(files.first);
+      setState(() => isDownloading = false);
+    } else {
+      _showFilePicker();
+    }
+  }
+
+  // ── Bottom sheet: pick which file to download ──────────────────────────────
+  void _showFilePicker() {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        final latestFiles = currentApp.files
+            .where((file) => file['is_old'] != true)
+            .toList();
+
+        final oldFiles = currentApp.files
+            .where((file) => file['is_old'] == true)
+            .toList();
+
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Handle bar
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade300,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  "Choose download",
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF1A1A1A),
+                  ),
+                ),
+                const SizedBox(height: 12),
+
+                // Latest files only
+                ...latestFiles.map((file) {
+                  final label = file['label'] as String? ?? 'Download';
+                  final type = (file['type'] as String? ?? 'other')
+                      .toUpperCase();
+
+                  return ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: Container(
+                      width: 42,
+                      height: 42,
+                      decoration: BoxDecoration(
+                        color: _purple.withOpacity(0.08),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Center(
+                        child: Text(
+                          type,
+                          style: const TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            color: _purple,
+                          ),
+                        ),
+                      ),
+                    ),
+                    title: Text(
+                      label,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF1A1A1A),
+                      ),
+                    ),
+                    trailing: const Icon(
+                      Icons.download_rounded,
+                      color: _purple,
+                    ),
+                    onTap: () async {
+                      Navigator.pop(ctx);
+                      setState(() => isDownloading = true);
+                      await _downloadFile(file);
+                      setState(() => isDownloading = false);
+                    },
+                  );
+                }),
+
+                // Manage Versions option
+                if (oldFiles.isNotEmpty) ...[
+                  const Divider(),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.history_rounded),
+                    title: const Text(
+                      "Manage Versions",
+                      style: TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                    trailing: const Icon(Icons.chevron_right_rounded, size: 18),
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      showModalBottomSheet(
+                        context: context,
+                        isScrollControlled: true,
+                        backgroundColor: Colors.transparent,
+                        builder: (_) => ManageVersionsButton(
+                          appId: currentApp.id,
+                          baseUrl: ApiConfig.baseUrl,
+                          authToken: context.read<AuthProvider>().token,
+                        ),
+                      );
+                    },
+                  ),
+                ],
+
+                const SizedBox(height: 8),
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
 
   Future<void> fetchRatings() async {
@@ -359,22 +513,31 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
+    print(currentApp.files);
     final auth = context.watch<AuthProvider>();
-    bool isInstalled = currentApp.installedVersionCode != null;
 
-    bool isUpdate =
+    // ── Determine APK install state (based on apk-type files only) ───────────
+    final apkFile = currentApp.files
+        .where((f) => f['type'] == 'apk' && f['is_old'] != true)
+        .firstOrNull;
+    final bool isInstalled = currentApp.installedVersionCode != null;
+    final bool isUpdate =
         isInstalled &&
         currentApp.installedVersionCode != currentApp.versionCode;
 
-    String buttonText;
+    final bool hasFiles = currentApp.files.isNotEmpty;
 
-    if (!isInstalled) {
+    String buttonText;
+    if (!isInstalled || apkFile == null) {
       buttonText = "Install";
     } else if (isUpdate) {
       buttonText = "Update";
     } else {
       buttonText = "Uninstall";
     }
+
+    final bool showInstallButton = hasFiles;
+    final bool tapUninstalls = isInstalled && !isUpdate && apkFile != null;
 
     return WillPopScope(
       onWillPop: () async {
@@ -403,6 +566,11 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
             ),
           ),
           actions: [
+            IconButton(
+              icon: const Icon(Icons.share_rounded, color: _purple),
+              tooltip: "Share",
+              onPressed: _shareApp,
+            ),
             if (auth.isAdmin) ...[
               IconButton(
                 icon: const Icon(Icons.edit_rounded, color: _purple),
@@ -426,7 +594,7 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
                 onPressed: _confirmDelete,
               ),
             ],
-            const SizedBox(width: 8),
+            const SizedBox(width: 4),
           ],
           bottom: PreferredSize(
             preferredSize: const Size.fromHeight(1),
@@ -441,7 +609,7 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // ── Hero card ──────────────────────────────────────
+                  // ── Hero card ──────────────────────────────────────────
                   _card(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -452,7 +620,7 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
                             ClipRRect(
                               borderRadius: BorderRadius.circular(20),
                               child: Image.network(
-                                "${ApiConfig.baseUrl}${currentApp.iconUrl}",
+                                getFullUrl(currentApp.iconUrl),
                                 width: 100,
                                 height: 100,
                                 fit: BoxFit.cover,
@@ -472,12 +640,33 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
                                     ),
                                   ),
                                   const SizedBox(height: 4),
-                                  Text(
-                                    currentApp.developer ?? "Unknown Developer",
-                                    style: const TextStyle(
-                                      color: _purple,
-                                      fontWeight: FontWeight.w600,
-                                      fontSize: 14,
+                                  GestureDetector(
+                                    onTap: _openDeveloperScreen,
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Flexible(
+                                          child: Text(
+                                            currentApp.developer ??
+                                                "Unknown Developer",
+                                            style: const TextStyle(
+                                              color: _purple,
+                                              fontWeight: FontWeight.w600,
+                                              fontSize: 14,
+                                              decoration:
+                                                  TextDecoration.underline,
+                                              decorationColor: _purple,
+                                            ),
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 4),
+                                        const Icon(
+                                          Icons.chevron_right_rounded,
+                                          size: 16,
+                                          color: _purple,
+                                        ),
+                                      ],
                                     ),
                                   ),
                                   const SizedBox(height: 10),
@@ -541,114 +730,67 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
 
                         const SizedBox(height: 20),
 
-                        Column(
-                          children: [
-                            if (currentApp.androidUrl != null &&
-                                currentApp.androidUrl!.isNotEmpty)
-                              SizedBox(
-                                width: double.infinity,
-                                height: 50,
-                                child: ElevatedButton.icon(
-                                  onPressed: isDownloading
-                                      ? null
-                                      : (!isInstalled)
-                                      ? installApp
-                                      : (isUpdate)
-                                      ? installApp
-                                      : () => confirmUninstall(),
-                                  icon: isDownloading
-                                      ? const SizedBox(
-                                          height: 18,
-                                          width: 18,
-                                          child: CircularProgressIndicator(
-                                            strokeWidth: 2,
-                                            color: Colors.white,
-                                          ),
-                                        )
-                                      : const Icon(Icons.android, size: 20),
-                                  label: Text(
-                                    isDownloading
-                                        ? "Downloading..."
-                                        : buttonText,
-                                    style: const TextStyle(
-                                      fontSize: 15,
-                                      fontWeight: FontWeight.w700,
+                        // ── Download / Install button ──────────────────────
+                        if (showInstallButton)
+                          SizedBox(
+                            width: double.infinity,
+                            height: 50,
+                            child: ElevatedButton.icon(
+                              onPressed: isDownloading
+                                  ? null
+                                  : tapUninstalls
+                                  ? confirmUninstall
+                                  : _handleInstallTap,
+                              icon: isDownloading
+                                  ? const SizedBox(
+                                      height: 18,
+                                      width: 18,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: Colors.white,
+                                      ),
+                                    )
+                                  : Icon(
+                                      currentApp.files.length > 1 &&
+                                              !tapUninstalls
+                                          ? Icons.expand_more_rounded
+                                          : Icons.android,
+                                      size: 20,
                                     ),
-                                  ),
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: _purple,
-                                    foregroundColor: Colors.white,
-                                    elevation: 0,
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(14),
-                                    ),
-                                  ),
+                              label: Text(
+                                isDownloading
+                                    ? "Downloading..."
+                                    : tapUninstalls
+                                    ? "Uninstall"
+                                    : currentApp.files.length > 1
+                                    ? "Download"
+                                    : buttonText,
+                                style: const TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w700,
                                 ),
                               ),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: _purple,
+                                foregroundColor: Colors.white,
+                                elevation: 0,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(14),
+                                ),
+                              ),
+                            ),
+                          ),
 
-                            if (currentApp.windowsUrl != null &&
-                                currentApp.windowsUrl!.isNotEmpty) ...[
-                              const SizedBox(height: 10),
-                              SizedBox(
-                                width: double.infinity,
-                                height: 50,
-                                child: ElevatedButton.icon(
-                                  onPressed: () => downloadFile("windows"),
-                                  icon: const Icon(Icons.window),
-                                  label: const Text(
-                                    "Download for Windows",
-                                    style: TextStyle(
-                                      fontSize: 15,
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: Colors.blueGrey,
-                                    foregroundColor: Colors.white,
-                                    elevation: 0,
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(14),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ],
-
-                            if (currentApp.linuxUrl != null &&
-                                currentApp.linuxUrl!.isNotEmpty) ...[
-                              const SizedBox(height: 10),
-                              SizedBox(
-                                width: double.infinity,
-                                height: 50,
-                                child: ElevatedButton.icon(
-                                  onPressed: () => downloadFile("linux"),
-                                  icon: const Icon(Icons.code),
-                                  label: const Text(
-                                    "Download for Linux",
-                                    style: TextStyle(
-                                      fontSize: 15,
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: Colors.black87,
-                                    foregroundColor: Colors.white,
-                                    elevation: 0,
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(14),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ],
-                        ),
+                        if (showInstallButton) ...[
+                          const SizedBox(height: 8),
+                          Align(alignment: Alignment.centerRight),
+                        ],
                       ],
                     ),
                   ),
                   const SizedBox(height: 16),
 
-                  // ── Screenshots ────────────────────────────────────
+                  // ── Screenshots ────────────────────────────────────────
                   _card(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -692,7 +834,7 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
 
                   const SizedBox(height: 16),
 
-                  // ── About ──────────────────────────────────────────
+                  // ── About ──────────────────────────────────────────────
                   _card(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -713,7 +855,7 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
 
                   const SizedBox(height: 16),
 
-                  // ── Rate this app ──────────────────────────────────
+                  // ── Rate this app ──────────────────────────────────────
                   _card(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -721,7 +863,6 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
                         _sectionTitle("Rate this app"),
                         const SizedBox(height: 14),
 
-                        // Star picker
                         Row(
                           children: List.generate(5, (index) {
                             final starIndex = index + 1;
@@ -849,7 +990,7 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
 
                   const SizedBox(height: 16),
 
-                  // ── Rating Distribution + Reviews ──────────────────
+                  // ── Rating Distribution + Reviews ──────────────────────
                   _card(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -857,7 +998,6 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
                         _sectionTitle("Reviews"),
                         const SizedBox(height: 16),
 
-                        // Distribution
                         ...List.generate(5, (i) {
                           final star = 5 - i;
                           final total = currentApp.totalReviews == 0
@@ -955,7 +1095,7 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
                                         backgroundImage:
                                             rating.profileImage != null
                                             ? NetworkImage(
-                                                "${ApiConfig.baseUrl}${rating.profileImage}",
+                                                getFullUrl(rating.profileImage),
                                               )
                                             : null,
                                         child: rating.profileImage == null
@@ -1028,12 +1168,89 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
                     ),
                   ),
 
+                  const SizedBox(height: 16),
+
+                  // ── More apps by this developer ────────────────────────
+                  _buildHorizontalAppSection(
+                    title:
+                        "More apps by ${currentApp.developer ?? 'this developer'}",
+                    apps: widget.allApps
+                        .where(
+                          (a) =>
+                              a.id != currentApp.id &&
+                              (a.developer ?? '') ==
+                                  (currentApp.developer ?? ''),
+                        )
+                        .toList(),
+                    emptyMessage: "No other apps by this developer",
+                  ),
+
+                  const SizedBox(height: 16),
+
+                  // ── Similar apps ───────────────────────────────────────
+                  _buildHorizontalAppSection(
+                    title: "Similar apps",
+                    apps: widget.allApps
+                        .where(
+                          (a) =>
+                              a.id != currentApp.id &&
+                              (a.category ?? '') ==
+                                  (currentApp.category ?? '') &&
+                              (a.category ?? '').isNotEmpty,
+                        )
+                        .toList(),
+                    emptyMessage: "No similar apps found",
+                  ),
+
                   const SizedBox(height: 24),
                 ],
               ),
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  // ── Horizontal app section ─────────────────────────────────────────────────
+  Widget _buildHorizontalAppSection({
+    required String title,
+    required List<AppModel> apps,
+    required String emptyMessage,
+  }) {
+    return _card(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _sectionTitle(title),
+          const SizedBox(height: 16),
+          if (apps.isEmpty)
+            Text(
+              emptyMessage,
+              style: TextStyle(color: Colors.grey.shade400, fontSize: 13),
+            )
+          else
+            SizedBox(
+              height: 130,
+              child: ListView.builder(
+                scrollDirection: Axis.horizontal,
+                itemCount: apps.length,
+                itemBuilder: (context, index) {
+                  final app = apps[index];
+                  return _HorizontalAppItem(
+                    app: app,
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) =>
+                            AppDetailScreen(app: app, allApps: widget.allApps),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -1118,5 +1335,88 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
 
   Widget _statDivider() {
     return Container(width: 1, height: 36, color: const Color(0xFFE0EEE5));
+  }
+}
+
+// ── Horizontal app item card ─────────────────────────────────────────────────
+class _HorizontalAppItem extends StatelessWidget {
+  final AppModel app;
+  final VoidCallback onTap;
+
+  static const _purple = Color(0xFF6A1B9A);
+
+  const _HorizontalAppItem({required this.app, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 90,
+        margin: const EdgeInsets.only(right: 14),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(16),
+              child: Image.network(
+                getFullUrl(app.iconUrl),
+                width: 72,
+                height: 72,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => Container(
+                  width: 72,
+                  height: 72,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF5FAF6),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: const Icon(
+                    Icons.apps_rounded,
+                    color: _purple,
+                    size: 28,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              app.name,
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF1A1A1A),
+              ),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+            ),
+            if (app.averageRating != null) ...[
+              const SizedBox(height: 3),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(
+                    Icons.star_rounded,
+                    color: Color(0xFFFFC107),
+                    size: 11,
+                  ),
+                  const SizedBox(width: 2),
+                  Text(
+                    app.averageRating!.toStringAsFixed(1),
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: Color(0xFF9E9E9E),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
   }
 }

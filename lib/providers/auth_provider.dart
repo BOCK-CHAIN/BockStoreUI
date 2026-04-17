@@ -107,16 +107,6 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
-  Future<String?> fetchHexId(String email) async {
-    final result = await _authService.getHexId(email);
-
-    if (result['success']) {
-      return result['hex_id'];
-    } else {
-      return result['error'];
-    }
-  }
-
   Future<void> logout() async {
     await _authService.logout();
     _user = null;

@@ -9,6 +9,7 @@ import 'app_detail_screen.dart';
 import 'admin_upload_screen.dart';
 import 'login_screen.dart';
 import 'package:play_store_app/config/api_config.dart';
+import 'package:play_store_app/config/url_helper.dart';
 import 'dart:async';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:image_picker/image_picker.dart';
@@ -49,9 +50,15 @@ class _HomeScreenState extends State<HomeScreen>
     curve: Curves.easeIn,
   );
 
+  // ── Wishlist state ─────────────────────────────────────────────────────────
+  Set<String> _wishlistIds = {};
+  static const _kWishlistKey = 'wishlist_ids';
+
   static const _purple = Color(0xFF6A1B9A);
   static const _bg = Color(0xFFF0F4F0);
   static const _bgDark = Color(0xFF121212);
+
+  static const double _kRailWidth = 64;
 
   Color get _scaffoldBg => _isDarkMode ? _bgDark : _bg;
   Color get _cardBg => _isDarkMode ? const Color(0xFF1E1E1E) : Colors.white;
@@ -66,6 +73,19 @@ class _HomeScreenState extends State<HomeScreen>
     super.initState();
     fetchApps();
     fetchRecentUpdates();
+    loadWishlist();
+    // ADDED: Login reminder notification
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!context.read<AuthProvider>().isLoggedIn) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Please login to access all features.'),
+            duration: Duration(seconds: 3),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    });
   }
 
   @override
@@ -75,6 +95,33 @@ class _HomeScreenState extends State<HomeScreen>
     _searchAnim.dispose();
     super.dispose();
   }
+
+  // ── Wishlist methods ───────────────────────────────────────────────────────
+
+  Future<void> loadWishlist() async {
+    final prefs = await SharedPreferences.getInstance();
+    final saved = prefs.getStringList(_kWishlistKey) ?? [];
+    setState(() {
+      _wishlistIds = saved.toSet();
+    });
+  }
+
+  Future<void> toggleWishlist(int appId) async {
+    final id = appId.toString();
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      if (_wishlistIds.contains(id)) {
+        _wishlistIds.remove(id);
+      } else {
+        _wishlistIds.add(id);
+      }
+    });
+    await prefs.setStringList(_kWishlistKey, _wishlistIds.toList());
+  }
+
+  bool isWishlisted(int appId) => _wishlistIds.contains(appId.toString());
+
+  // ── Existing methods ───────────────────────────────────────────────────────
 
   Future<bool> isNewApp(int appId) async {
     final prefs = await SharedPreferences.getInstance();
@@ -312,8 +359,6 @@ class _HomeScreenState extends State<HomeScreen>
 
     return Scaffold(
       backgroundColor: _scaffoldBg,
-
-      // ── Bottom nav: mobile only ──────────────────────────────────────────
       bottomNavigationBar: isDesktop
           ? null
           : BottomNavigationBar(
@@ -344,8 +389,6 @@ class _HomeScreenState extends State<HomeScreen>
                 ),
               ],
             ),
-
-      // ── AppBar ────────────────────────────────────────────────────────────
       appBar: PreferredSize(
         preferredSize: Size.fromHeight(isDesktop ? 68 : 62),
         child: Container(
@@ -372,38 +415,15 @@ class _HomeScreenState extends State<HomeScreen>
           ),
         ),
       ),
-
-      // ── Body ──────────────────────────────────────────────────────────────
       body: isDesktop
           ? Row(
               children: [
-                // Fixed sidebar
                 _buildDesktopSidebar(),
-                // Main content
                 Expanded(
                   child: apps.isEmpty
-                      ? Center(
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                Icons.search_off_rounded,
-                                size: 56,
-                                color: Colors.grey.shade300,
-                              ),
-                              const SizedBox(height: 12),
-                              Text(
-                                "No apps found",
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  color: _textSecondary,
-                                ),
-                              ),
-                            ],
-                          ),
-                        )
+                      ? _emptyState()
                       : selectedIndex == 0
-                      ? _buildDesktopGrid(width - 240)
+                      ? _buildDesktopGrid(width - _kRailWidth)
                       : getMobileBody(),
                 ),
               ],
@@ -411,34 +431,66 @@ class _HomeScreenState extends State<HomeScreen>
           : Center(
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 1300),
-                child: apps.isEmpty
-                    ? Center(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              Icons.search_off_rounded,
-                              size: 56,
-                              color: Colors.grey.shade300,
-                            ),
-                            const SizedBox(height: 12),
-                            Text(
-                              "No apps found",
-                              style: TextStyle(
-                                fontSize: 16,
-                                color: _textSecondary,
-                              ),
-                            ),
-                          ],
-                        ),
-                      )
-                    : getMobileBody(),
+                child: apps.isEmpty ? _emptyState() : getMobileBody(),
               ),
             ),
     );
   }
 
-  // ── Desktop AppBar (unchanged behaviour) ──────────────────────────────────
+  Widget _emptyState() => Center(
+    child: Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(Icons.search_off_rounded, size: 56, color: Colors.grey.shade300),
+        const SizedBox(height: 12),
+        Text(
+          "No apps found",
+          style: TextStyle(fontSize: 16, color: _textSecondary),
+        ),
+      ],
+    ),
+  );
+
+  Widget _buildDesktopSidebar() {
+    final items = [
+      (Icons.category_rounded, "Categories"),
+      (Icons.favorite_rounded, "Wishlist"),
+      (Icons.trending_up_rounded, "Top"),
+      (Icons.person_rounded, "Profile"),
+    ];
+
+    return Container(
+      width: _kRailWidth,
+      height: double.infinity,
+      decoration: BoxDecoration(
+        color: _cardBg,
+        border: Border(
+          right: BorderSide(
+            color: _isDarkMode
+                ? Colors.white.withOpacity(0.06)
+                : Colors.black.withOpacity(0.08),
+            width: 1,
+          ),
+        ),
+      ),
+      child: Column(
+        children: [
+          const SizedBox(height: 12),
+          ...List.generate(items.length, (index) {
+            final (icon, label) = items[index];
+            return _RailItem(
+              icon: icon,
+              label: label,
+              isSelected: selectedIndex == index,
+              isDarkMode: _isDarkMode,
+              onTap: () => setState(() => selectedIndex = index),
+            );
+          }),
+        ],
+      ),
+    );
+  }
+
   Widget _buildDesktopAppBar(AuthProvider auth) {
     return Row(
       children: [
@@ -461,12 +513,8 @@ class _HomeScreenState extends State<HomeScreen>
           ),
         ),
         const SizedBox(width: 20),
-
-        // Search bar
         Expanded(child: _searchBar()),
-
         const SizedBox(width: 12),
-
         if (auth.isAdmin) ...[
           Tooltip(
             message: "Upload App",
@@ -498,12 +546,10 @@ class _HomeScreenState extends State<HomeScreen>
             message: "App Activity Logs",
             child: InkWell(
               borderRadius: BorderRadius.circular(10),
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const AdminLogsScreen()),
-                );
-              },
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const AdminLogsScreen()),
+              ),
               child: Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
@@ -520,7 +566,6 @@ class _HomeScreenState extends State<HomeScreen>
           ),
           const SizedBox(width: 10),
         ],
-
         auth.isLoggedIn
             ? _profileMenu(auth)
             : ElevatedButton(
@@ -550,7 +595,6 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  // ── Mobile AppBar: animated search expand ────────────────────────────────
   Widget _buildMobileAppBar(AuthProvider auth) {
     Widget iconBtn({required IconData icon, required VoidCallback onTap}) =>
         GestureDetector(
@@ -565,7 +609,6 @@ class _HomeScreenState extends State<HomeScreen>
           ),
         );
 
-    // The two permanent right-side icons (never move, never overflow)
     final rightIcons = Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -596,17 +639,14 @@ class _HomeScreenState extends State<HomeScreen>
 
     return Row(
       children: [
-        // ── Left side: logo fades+shrinks out, search bar grows in ───────────
         Expanded(
           child: AnimatedBuilder(
             animation: _searchAnim,
             builder: (context, _) {
-              final t = _searchAnim.value; // 0 = closed, 1 = open
-
+              final t = _searchAnim.value;
               return Stack(
                 alignment: Alignment.centerLeft,
                 children: [
-                  // Logo — slides left and fades out
                   if (t < 1.0)
                     Opacity(
                       opacity: (1.0 - t * 2).clamp(0.0, 1.0),
@@ -638,8 +678,6 @@ class _HomeScreenState extends State<HomeScreen>
                         ],
                       ),
                     ),
-
-                  // Search bar — fades + expands in from the right
                   if (t > 0.0)
                     Opacity(
                       opacity: (t * 2 - 1).clamp(0.0, 1.0),
@@ -686,14 +724,11 @@ class _HomeScreenState extends State<HomeScreen>
             },
           ),
         ),
-
-        // ── Right icons: always in place, never cause overflow ───────────────
         rightIcons,
       ],
     );
   }
 
-  // ── Shared search bar ─────────────────────────────────────────────────────
   Widget _searchBar({double height = 40}) {
     return Container(
       height: height,
@@ -727,10 +762,13 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  // ── Profile popup menu (desktop) ──────────────────────────────────────────
   Widget _profileMenu(AuthProvider auth) {
     return PopupMenuButton<String>(
       onSelected: (value) async {
+        if (value == "toggle_theme") {
+          setState(() => _isDarkMode = !_isDarkMode);
+          return;
+        }
         if (value == "upload") {
           await pickProfileImage();
         } else if (value == "my_apps") {
@@ -775,9 +813,7 @@ class _HomeScreenState extends State<HomeScreen>
           if (confirm == true) {
             final success = await context.read<AuthProvider>().deleteAccount();
             if (!mounted) return;
-            if (success) {
-              Navigator.popUntil(context, (route) => route.isFirst);
-            }
+            if (success) Navigator.popUntil(context, (route) => route.isFirst);
           }
         } else if (value == "logout") {
           auth.logout();
@@ -788,7 +824,7 @@ class _HomeScreenState extends State<HomeScreen>
         radius: 17,
         backgroundColor: _purple.withOpacity(0.15),
         backgroundImage: auth.user?.profileImage != null
-            ? NetworkImage("${ApiConfig.baseUrl}${auth.user!.profileImage}")
+            ? NetworkImage(getFullUrl(auth.user!.profileImage))
             : null,
         child: auth.user?.profileImage == null
             ? Text(
@@ -840,6 +876,22 @@ class _HomeScreenState extends State<HomeScreen>
           ),
         ),
         PopupMenuItem(
+          value: "toggle_theme",
+          child: Row(
+            children: [
+              Icon(
+                _isDarkMode
+                    ? Icons.light_mode_rounded
+                    : Icons.dark_mode_rounded,
+                size: 18,
+                color: _purple,
+              ),
+              const SizedBox(width: 10),
+              Text(_isDarkMode ? "Light Mode" : "Dark Mode"),
+            ],
+          ),
+        ),
+        PopupMenuItem(
           value: "logout",
           child: Row(
             children: const [
@@ -853,61 +905,6 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  // ── Desktop Sidebar ───────────────────────────────────────────────────────
-  Widget _buildDesktopSidebar() {
-    final items = [
-      (Icons.category_rounded, "Categories"),
-      (Icons.favorite_rounded, "Wishlist"),
-      (Icons.trending_up_rounded, "Most Downloaded"),
-      (Icons.person_rounded, "Profile"),
-    ];
-
-    return Container(
-      width: 240,
-      height: double.infinity,
-      decoration: BoxDecoration(
-        color: _cardBg,
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 12,
-            offset: const Offset(2, 0),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const SizedBox(height: 28),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: Text(
-              "MENU",
-              style: TextStyle(
-                fontSize: 10,
-                fontWeight: FontWeight.w800,
-                letterSpacing: 1.6,
-                color: _textSecondary,
-              ),
-            ),
-          ),
-          const SizedBox(height: 10),
-          ...List.generate(items.length, (index) {
-            final (icon, label) = items[index];
-            return _SidebarItem(
-              icon: icon,
-              label: label,
-              isSelected: selectedIndex == index,
-              isDarkMode: _isDarkMode,
-              onTap: () => setState(() => selectedIndex = index),
-            );
-          }),
-        ],
-      ),
-    );
-  }
-
-  // ── Desktop grid ──────────────────────────────────────────────────────────
   Widget _buildDesktopGrid(double width) {
     return GridView.builder(
       padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 32),
@@ -927,11 +924,15 @@ class _HomeScreenState extends State<HomeScreen>
         return _AppCard(
           app: app,
           isNewApp: isNewApp,
+          wishlisted: isWishlisted(app.id),
+          onWishlistToggle: () => toggleWishlist(app.id),
           onTap: () async {
             await markAppSeen(app.id);
             final deleted = await Navigator.push(
               context,
-              MaterialPageRoute(builder: (_) => AppDetailScreen(app: app)),
+              MaterialPageRoute(
+                builder: (_) => AppDetailScreen(app: app, allApps: apps),
+              ),
             );
             if (deleted == true) fetchApps();
           },
@@ -940,7 +941,6 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  // ── Mobile body router ────────────────────────────────────────────────────
   Widget getMobileBody() {
     switch (selectedIndex) {
       case 0:
@@ -966,11 +966,15 @@ class _HomeScreenState extends State<HomeScreen>
           app: app,
           isNewApp: isNewApp,
           isDarkMode: _isDarkMode,
+          wishlisted: isWishlisted(app.id),
+          onWishlistToggle: () => toggleWishlist(app.id),
           onTap: () async {
             await markAppSeen(app.id);
             Navigator.push(
               context,
-              MaterialPageRoute(builder: (_) => AppDetailScreen(app: app)),
+              MaterialPageRoute(
+                builder: (_) => AppDetailScreen(app: app, allApps: apps),
+              ),
             );
           },
         );
@@ -978,19 +982,281 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  Widget buildWishlist() => Center(
-    child: Text(
-      "Wishlist",
-      style: TextStyle(color: _textSecondary, fontSize: 16),
-    ),
-  );
+  // ── Wishlist screen ───────────────────────────────────────────────────────
+  Widget buildWishlist() {
+    final wishlistedApps = apps.where((app) => isWishlisted(app.id)).toList();
 
-  Widget buildTopApps() => Center(
-    child: Text(
-      "Most Downloaded",
-      style: TextStyle(color: _textSecondary, fontSize: 16),
-    ),
-  );
+    if (wishlistedApps.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.favorite_border_rounded,
+              size: 64,
+              color: Colors.grey.shade300,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              "No items in wishlist",
+              style: TextStyle(color: _textSecondary, fontSize: 16),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              "Tap the heart on any app to save it here.",
+              style: TextStyle(color: _textSecondary, fontSize: 13),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+      itemCount: wishlistedApps.length,
+      itemBuilder: (context, index) {
+        final app = wishlistedApps[index];
+        return _AppListTile(
+          app: app,
+          isNewApp: isNewApp,
+          isDarkMode: _isDarkMode,
+          wishlisted: true,
+          onWishlistToggle: () => toggleWishlist(app.id),
+          onTap: () async {
+            await markAppSeen(app.id);
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => AppDetailScreen(app: app, allApps: apps),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  // ── Most Downloaded ───────────────────────────────────────────────────────
+  Widget buildTopApps() {
+    if (apps.isEmpty) {
+      return Center(
+        child: Text(
+          "No apps available",
+          style: TextStyle(color: _textSecondary, fontSize: 15),
+        ),
+      );
+    }
+
+    final sorted = [...apps]
+      ..sort((a, b) => b.downloadCount.compareTo(a.downloadCount));
+
+    return CustomScrollView(
+      slivers: [
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 20, 16, 4),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: _purple.withOpacity(0.10),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(
+                    Icons.trending_up_rounded,
+                    color: _purple,
+                    size: 18,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      "Most Downloaded",
+                      style: TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.w800,
+                        color: _textPrimary,
+                      ),
+                    ),
+                    Text(
+                      "${sorted.length} apps ranked by downloads",
+                      style: TextStyle(fontSize: 12, color: _textSecondary),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+
+        const SliverToBoxAdapter(child: SizedBox(height: 12)),
+
+        SliverList(
+          delegate: SliverChildBuilderDelegate((context, index) {
+            final app = sorted[index];
+            final rank = index + 1;
+
+            return Padding(
+              padding: const EdgeInsets.fromLTRB(14, 0, 14, 10),
+              child: Container(
+                decoration: BoxDecoration(
+                  color: _cardBg,
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(_isDarkMode ? 0.2 : 0.04),
+                      blurRadius: 10,
+                      offset: const Offset(0, 3),
+                    ),
+                  ],
+                ),
+                child: Material(
+                  color: Colors.transparent,
+                  borderRadius: BorderRadius.circular(16),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(16),
+                    onTap: () async {
+                      await markAppSeen(app.id);
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) =>
+                              AppDetailScreen(app: app, allApps: apps),
+                        ),
+                      );
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 12,
+                      ),
+                      child: Row(
+                        children: [
+                          SizedBox(
+                            width: 32,
+                            child: rank <= 3
+                                ? _TopBadge(rank: rank)
+                                : Text(
+                                    "$rank",
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w700,
+                                      color: _textSecondary,
+                                    ),
+                                  ),
+                          ),
+                          const SizedBox(width: 10),
+
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(12),
+                            child: Image.network(
+                              getFullUrl(app.iconUrl),
+                              width: 52,
+                              height: 52,
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, __, ___) => Container(
+                                width: 52,
+                                height: 52,
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFF5FAF6),
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: const Icon(
+                                  Icons.apps_rounded,
+                                  color: _purple,
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  app.name,
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 14,
+                                    color: _textPrimary,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  app.developer ?? "Unknown Developer",
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: _purple,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                const SizedBox(height: 4),
+                                Row(
+                                  children: [
+                                    const Icon(
+                                      Icons.download_rounded,
+                                      size: 13,
+                                      color: _purple,
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      "${app.downloadCount} download${app.downloadCount == 1 ? '' : 's'}",
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: _textSecondary,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                    if (app.averageRating != null) ...[
+                                      const SizedBox(width: 10),
+                                      const Icon(
+                                        Icons.star_rounded,
+                                        size: 13,
+                                        color: Color(0xFFFFC107),
+                                      ),
+                                      const SizedBox(width: 3),
+                                      Text(
+                                        app.averageRating!.toStringAsFixed(1),
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: _textSecondary,
+                                        ),
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+
+                          const Icon(
+                            Icons.chevron_right_rounded,
+                            color: Color(0xFFBDBDBD),
+                            size: 20,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            );
+          }, childCount: sorted.length),
+        ),
+
+        const SliverToBoxAdapter(child: SizedBox(height: 20)),
+      ],
+    );
+  }
 
   Widget buildProfile() {
     final auth = context.watch<AuthProvider>();
@@ -1040,7 +1306,6 @@ class _HomeScreenState extends State<HomeScreen>
     return ListView(
       padding: const EdgeInsets.all(20),
       children: [
-        // Avatar + name
         Center(
           child: Column(
             children: [
@@ -1052,9 +1317,7 @@ class _HomeScreenState extends State<HomeScreen>
                       radius: 44,
                       backgroundColor: _purple.withOpacity(0.15),
                       backgroundImage: auth.user?.profileImage != null
-                          ? NetworkImage(
-                              "${ApiConfig.baseUrl}${auth.user!.profileImage}",
-                            )
+                          ? NetworkImage(getFullUrl(auth.user!.profileImage))
                           : null,
                       child: auth.user?.profileImage == null
                           ? Text(
@@ -1118,17 +1381,13 @@ class _HomeScreenState extends State<HomeScreen>
             ],
           ),
         ),
-
         const SizedBox(height: 28),
-
-        // Menu items
         _profileTile(Icons.apps_rounded, "My Apps", () {
           Navigator.push(
             context,
             MaterialPageRoute(builder: (_) => const MyAppsScreen()),
           );
         }),
-
         if (auth.isAdmin) ...[
           _profileTile(
             Icons.admin_panel_settings_rounded,
@@ -1148,17 +1407,14 @@ class _HomeScreenState extends State<HomeScreen>
             );
           }),
         ],
-
         _profileTile(
           Icons.image_rounded,
           "Change Profile Image",
           pickProfileImage,
         ),
-
         const SizedBox(height: 8),
         const Divider(),
         const SizedBox(height: 8),
-
         _profileTile(
           Icons.logout_rounded,
           "Logout",
@@ -1202,9 +1458,7 @@ class _HomeScreenState extends State<HomeScreen>
           if (confirm == true) {
             final success = await context.read<AuthProvider>().deleteAccount();
             if (!mounted) return;
-            if (success) {
-              Navigator.popUntil(context, (route) => route.isFirst);
-            }
+            if (success) Navigator.popUntil(context, (route) => route.isFirst);
           }
         }, color: Colors.red.shade400),
       ],
@@ -1253,15 +1507,51 @@ class _HomeScreenState extends State<HomeScreen>
   }
 }
 
-// ── Sidebar Item ─────────────────────────────────────────────────────────────
-class _SidebarItem extends StatefulWidget {
+// ── Top rank badge (gold/silver/bronze) ──────────────────────────────────────
+class _TopBadge extends StatelessWidget {
+  final int rank;
+  const _TopBadge({required this.rank});
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = [
+      const Color(0xFFFFD700),
+      const Color(0xFFB0BEC5),
+      const Color(0xFFBF8970),
+    ];
+    final color = colors[rank - 1];
+
+    return Container(
+      width: 28,
+      height: 28,
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.15),
+        shape: BoxShape.circle,
+        border: Border.all(color: color, width: 1.5),
+      ),
+      child: Center(
+        child: Text(
+          "$rank",
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w800,
+            color: color,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ── Rail Item ────────────────────────────────────────────────────────────────
+class _RailItem extends StatefulWidget {
   final IconData icon;
   final String label;
   final bool isSelected;
   final bool isDarkMode;
   final VoidCallback onTap;
 
-  const _SidebarItem({
+  const _RailItem({
     required this.icon,
     required this.label,
     required this.isSelected,
@@ -1270,56 +1560,66 @@ class _SidebarItem extends StatefulWidget {
   });
 
   @override
-  State<_SidebarItem> createState() => _SidebarItemState();
+  State<_RailItem> createState() => _RailItemState();
 }
 
-class _SidebarItemState extends State<_SidebarItem> {
+class _RailItemState extends State<_RailItem> {
   bool _hovered = false;
   static const _purple = Color(0xFF6A1B9A);
 
   @override
   Widget build(BuildContext context) {
-    final Color bg = widget.isSelected
+    final Color iconColor = widget.isSelected
         ? _purple
-        : _hovered
-        ? _purple.withOpacity(0.08)
-        : Colors.transparent;
-
-    final Color fgColor = widget.isSelected
-        ? Colors.white
         : widget.isDarkMode
         ? const Color(0xFFAAAAAA)
-        : const Color(0xFF1A1A1A);
+        : const Color(0xFF757575);
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
+    final Color pillBg = widget.isSelected
+        ? _purple.withOpacity(0.13)
+        : _hovered
+        ? _purple.withOpacity(0.07)
+        : Colors.transparent;
+
+    return Tooltip(
+      message: widget.label,
+      preferBelow: false,
+      waitDuration: const Duration(milliseconds: 500),
       child: MouseRegion(
         cursor: SystemMouseCursors.click,
         onEnter: (_) => setState(() => _hovered = true),
         onExit: (_) => setState(() => _hovered = false),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 160),
-          decoration: BoxDecoration(
-            color: bg,
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: InkWell(
-            borderRadius: BorderRadius.circular(12),
-            onTap: widget.onTap,
+        child: GestureDetector(
+          onTap: widget.onTap,
+          child: SizedBox(
+            width: double.infinity,
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-              child: Row(
+              padding: const EdgeInsets.symmetric(vertical: 6),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(widget.icon, color: fgColor, size: 20),
-                  const SizedBox(width: 12),
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 150),
+                    width: 48,
+                    height: 30,
+                    decoration: BoxDecoration(
+                      color: pillBg,
+                      borderRadius: BorderRadius.circular(15),
+                    ),
+                    child: Icon(widget.icon, color: iconColor, size: 22),
+                  ),
+                  const SizedBox(height: 4),
                   Text(
                     widget.label,
+                    textAlign: TextAlign.center,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      fontSize: 14,
+                      fontSize: 10,
                       fontWeight: widget.isSelected
                           ? FontWeight.w700
-                          : FontWeight.w500,
-                      color: fgColor,
+                          : FontWeight.w400,
+                      color: iconColor,
                     ),
                   ),
                 ],
@@ -1336,11 +1636,15 @@ class _SidebarItemState extends State<_SidebarItem> {
 class _AppCard extends StatefulWidget {
   final AppModel app;
   final Future<bool> Function(int) isNewApp;
+  final bool wishlisted;
+  final VoidCallback onWishlistToggle;
   final VoidCallback onTap;
 
   const _AppCard({
     required this.app,
     required this.isNewApp,
+    required this.wishlisted,
+    required this.onWishlistToggle,
     required this.onTap,
   });
 
@@ -1382,144 +1686,165 @@ class _AppCardState extends State<_AppCard> {
             onTap: widget.onTap,
             child: Padding(
               padding: const EdgeInsets.all(16),
-              child: Column(
+              child: Stack(
                 children: [
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(18),
-                    child: Image.network(
-                      "${ApiConfig.baseUrl}${app.iconUrl}",
-                      width: 80,
-                      height: 80,
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => Container(
-                        width: 80,
-                        height: 80,
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFF5FAF6),
-                          borderRadius: BorderRadius.circular(18),
-                        ),
-                        child: const Icon(
-                          Icons.apps_rounded,
-                          color: _purple,
-                          size: 36,
+                  Column(
+                    children: [
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(18),
+                        child: Image.network(
+                          getFullUrl(app.iconUrl),
+                          width: 80,
+                          height: 80,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => Container(
+                            width: 80,
+                            height: 80,
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF5FAF6),
+                              borderRadius: BorderRadius.circular(18),
+                            ),
+                            child: const Icon(
+                              Icons.apps_rounded,
+                              color: _purple,
+                              size: 36,
+                            ),
+                          ),
                         ),
                       ),
-                    ),
-                  ),
-
-                  const SizedBox(height: 12),
-
-                  FutureBuilder<bool>(
-                    future: widget.isNewApp(app.id),
-                    builder: (context, snapshot) {
-                      final isNew = snapshot.data ?? false;
-                      return Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Flexible(
-                            child: Column(
-                              children: [
-                                Text(
-                                  app.name,
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.w700,
-                                    fontSize: 14,
-                                    color: Color(0xFF1A1A1A),
-                                  ),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  textAlign: TextAlign.center,
+                      const SizedBox(height: 12),
+                      FutureBuilder<bool>(
+                        future: widget.isNewApp(app.id),
+                        builder: (context, snapshot) {
+                          final isNew = snapshot.data ?? false;
+                          return Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Flexible(
+                                child: Column(
+                                  children: [
+                                    Text(
+                                      app.name,
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w700,
+                                        fontSize: 14,
+                                        color: Color(0xFF1A1A1A),
+                                      ),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      textAlign: TextAlign.center,
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      app.category ?? "Unknown",
+                                      style: const TextStyle(
+                                        fontSize: 11,
+                                        color: Color(0xFF757575),
+                                      ),
+                                    ),
+                                  ],
                                 ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  app.category ?? "Unknown",
-                                  style: const TextStyle(
-                                    fontSize: 11,
-                                    color: Color(0xFF757575),
+                              ),
+                              if (isNew) ...[
+                                const SizedBox(width: 5),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 5,
+                                    vertical: 2,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: _purple,
+                                    borderRadius: BorderRadius.circular(5),
+                                  ),
+                                  child: const Text(
+                                    "NEW",
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 9,
+                                      fontWeight: FontWeight.w800,
+                                    ),
                                   ),
                                 ),
                               ],
+                            ],
+                          );
+                        },
+                      ),
+                      const SizedBox(height: 5),
+                      if (app.averageRating != null)
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const Icon(
+                              Icons.star_rounded,
+                              color: Color(0xFFFFC107),
+                              size: 14,
                             ),
-                          ),
-                          if (isNew) ...[
-                            const SizedBox(width: 5),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 5,
-                                vertical: 2,
-                              ),
-                              decoration: BoxDecoration(
-                                color: _purple,
-                                borderRadius: BorderRadius.circular(5),
-                              ),
-                              child: const Text(
-                                "NEW",
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 9,
-                                  fontWeight: FontWeight.w800,
+                            const SizedBox(width: 3),
+                            Flexible(
+                              child: Text(
+                                "${app.averageRating!.toStringAsFixed(1)}  ·  ${app.totalReviews}",
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  color: Color(0xFF757575),
                                 ),
+                                overflow: TextOverflow.ellipsis,
                               ),
                             ),
                           ],
-                        ],
-                      );
-                    },
-                  ),
-
-                  const SizedBox(height: 5),
-
-                  if (app.averageRating != null)
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        const Icon(
-                          Icons.star_rounded,
-                          color: Color(0xFFFFC107),
-                          size: 14,
-                        ),
-                        const SizedBox(width: 3),
-                        Flexible(
-                          child: Text(
-                            "${app.averageRating!.toStringAsFixed(1)}  ·  ${app.totalReviews}",
-                            style: const TextStyle(
-                              fontSize: 12,
-                              color: Color(0xFF757575),
-                            ),
-                            overflow: TextOverflow.ellipsis,
+                        )
+                      else
+                        const Text(
+                          "No ratings yet",
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Color(0xFFBDBDBD),
                           ),
                         ),
-                      ],
-                    )
-                  else
-                    const Text(
-                      "No ratings yet",
-                      style: TextStyle(fontSize: 12, color: Color(0xFFBDBDBD)),
-                    ),
-
-                  const SizedBox(height: 3),
-
-                  Text(
-                    "${app.downloadCount} download${app.downloadCount == 1 ? '' : 's'}",
-                    style: const TextStyle(
-                      fontSize: 11,
-                      color: Color(0xFFBDBDBD),
-                    ),
-                    overflow: TextOverflow.ellipsis,
+                      const SizedBox(height: 3),
+                      Text(
+                        "${app.downloadCount} download${app.downloadCount == 1 ? '' : 's'}",
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: Color(0xFFBDBDBD),
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 10),
+                      Expanded(
+                        child: Text(
+                          app.description,
+                          textAlign: TextAlign.center,
+                          maxLines: 3,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: Color(0xFF757575),
+                            height: 1.4,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-
-                  const SizedBox(height: 10),
-
-                  Expanded(
-                    child: Text(
-                      app.description,
-                      textAlign: TextAlign.center,
-                      maxLines: 3,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: Color(0xFF757575),
-                        height: 1.4,
+                  Positioned(
+                    top: 0,
+                    right: 0,
+                    child: GestureDetector(
+                      onTap: widget.onWishlistToggle,
+                      child: AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 200),
+                        transitionBuilder: (child, anim) =>
+                            ScaleTransition(scale: anim, child: child),
+                        child: Icon(
+                          widget.wishlisted
+                              ? Icons.favorite_rounded
+                              : Icons.favorite_border_rounded,
+                          key: ValueKey(widget.wishlisted),
+                          color: widget.wishlisted
+                              ? Colors.redAccent
+                              : const Color(0xFFBDBDBD),
+                          size: 20,
+                        ),
                       ),
                     ),
                   ),
@@ -1533,12 +1858,14 @@ class _AppCardState extends State<_AppCard> {
   }
 }
 
-// ── App List Tile (mobile categories) ───────────────────────────────────────
+// ── App List Tile (mobile) ───────────────────────────────────────────────────
 class _AppListTile extends StatelessWidget {
   final AppModel app;
   final Future<bool> Function(int) isNewApp;
   final VoidCallback onTap;
   final bool isDarkMode;
+  final bool wishlisted;
+  final VoidCallback onWishlistToggle;
 
   static const _purple = Color(0xFF6A1B9A);
 
@@ -1547,6 +1874,8 @@ class _AppListTile extends StatelessWidget {
     required this.isNewApp,
     required this.onTap,
     required this.isDarkMode,
+    required this.wishlisted,
+    required this.onWishlistToggle,
   });
 
   String getButtonText(AppModel app) {
@@ -1586,11 +1915,10 @@ class _AppListTile extends StatelessWidget {
             padding: const EdgeInsets.all(12),
             child: Row(
               children: [
-                // Icon
                 ClipRRect(
                   borderRadius: BorderRadius.circular(12),
                   child: Image.network(
-                    "${ApiConfig.baseUrl}${app.iconUrl}",
+                    getFullUrl(app.iconUrl),
                     width: 54,
                     height: 54,
                     fit: BoxFit.cover,
@@ -1603,13 +1931,10 @@ class _AppListTile extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 12),
-
-                // Info
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // Name + NEW badge
                       Row(
                         children: [
                           Expanded(
@@ -1654,14 +1979,11 @@ class _AppListTile extends StatelessWidget {
                         ],
                       ),
                       const SizedBox(height: 2),
-
                       Text(
                         app.category ?? "Unknown",
                         style: TextStyle(fontSize: 11, color: _textSecondary),
                       ),
-
                       const SizedBox(height: 3),
-
                       Text(
                         app.description,
                         maxLines: 1,
@@ -1672,9 +1994,7 @@ class _AppListTile extends StatelessWidget {
                           height: 1.4,
                         ),
                       ),
-
                       const SizedBox(height: 4),
-
                       Row(
                         children: [
                           if (app.averageRating != null) ...[
@@ -1708,10 +2028,26 @@ class _AppListTile extends StatelessWidget {
                     ],
                   ),
                 ),
-
-                const SizedBox(width: 10),
-
-                // Install / Update / Open button
+                const SizedBox(width: 8),
+                GestureDetector(
+                  onTap: onWishlistToggle,
+                  child: AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 200),
+                    transitionBuilder: (child, anim) =>
+                        ScaleTransition(scale: anim, child: child),
+                    child: Icon(
+                      wishlisted
+                          ? Icons.favorite_rounded
+                          : Icons.favorite_border_rounded,
+                      key: ValueKey(wishlisted),
+                      color: wishlisted
+                          ? Colors.redAccent
+                          : const Color(0xFFBDBDBD),
+                      size: 20,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
                 Container(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 12,

@@ -156,22 +156,6 @@ class AuthService {
     return res.statusCode == 200;
   }
 
-  Future<Map<String, dynamic>> getHexId(String email) async {
-    final res = await http.post(
-      Uri.parse('${ApiConfig.baseUrl}/api/auth/forgot-hexid'),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({'email': email}),
-    );
-
-    final data = jsonDecode(res.body);
-
-    if (res.statusCode == 200) {
-      return {'success': true, 'hex_id': data['hex_id']};
-    } else {
-      return {'success': false, 'error': data['error']};
-    }
-  }
-
   Future<String?> getToken() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getString(_tokenKey);

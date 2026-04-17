@@ -14,9 +14,7 @@ class AppModel {
   final int totalReviews;
   final int downloadCount;
   final int? installedVersionCode;
-  final String? androidUrl;
-  final String? windowsUrl;
-  final String? linuxUrl;
+  final List<Map<String, dynamic>> files;
   final String? category;
 
   AppModel({
@@ -35,9 +33,7 @@ class AppModel {
     this.averageRating,
     this.totalReviews = 0,
     this.downloadCount = 0,
-    this.androidUrl,
-    this.windowsUrl,
-    this.linuxUrl,
+    this.files = const [],
     this.category,
   });
 
@@ -62,9 +58,9 @@ class AppModel {
       installedVersionCode: json["installed_version_code"] != null
           ? int.tryParse(json["installed_version_code"].toString())
           : null,
-      androidUrl: json['android_url'],
-      windowsUrl: json['windows_url'],
-      linuxUrl: json['linux_url'],
+      files: (json['files'] as List<dynamic>? ?? [])
+          .map((f) => Map<String, dynamic>.from(f as Map))
+          .toList(),
       category: json['category'],
     );
   }

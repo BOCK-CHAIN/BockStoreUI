@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
 import 'register_screen.dart';
-import 'forgot_hexid_screen.dart';
 import 'home_screen.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -255,37 +254,6 @@ class _LoginScreenState extends State<LoginScreen>
                                       ? 'Min 6 characters'
                                       : null,
                                 ),
-
-                                Align(
-                                  alignment: Alignment.centerRight,
-                                  child: TextButton(
-                                    onPressed: () {
-                                      Navigator.push(
-                                        context,
-                                        MaterialPageRoute(
-                                          builder: (_) =>
-                                              const ForgotHexIdScreen(),
-                                        ),
-                                      );
-                                    },
-                                    style: TextButton.styleFrom(
-                                      foregroundColor: const Color(0xFF6A1B9A),
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 4,
-                                        vertical: 8,
-                                      ),
-                                    ),
-                                    child: const Text(
-                                      'Forgot Hex ID?',
-                                      style: TextStyle(
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-
-                                const SizedBox(height: 8),
 
                                 // Login button
                                 SizedBox(
