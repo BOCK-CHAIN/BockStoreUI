@@ -74,4 +74,49 @@ class ApiService {
       body: jsonEncode(body),
     );
   }
+
+  static Future<Map<String, dynamic>> getPresignedUrl({
+    required String fileName,
+    required String fileType,
+    required String folder,
+    required String token,
+  }) async {
+    final res = await http.post(
+      Uri.parse('${ApiConfig.baseUrl}/api/admin/presigned-url'),
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $token',
+      },
+      body: jsonEncode({
+        'fileName': fileName,
+        'fileType': fileType,
+        'folder': folder,
+      }),
+    );
+
+    if (res.statusCode == 200) {
+      return jsonDecode(res.body);
+    } else {
+      throw Exception('Failed to get presigned URL: ${res.body}');
+    }
+  }
+
+  static Future<String> uploadFileToS3({
+    required String uploadUrl,
+    required String fileUrl,
+    required List<int> fileBytes,
+    required String fileType,
+  }) async {
+    final res = await http.put(
+      Uri.parse(uploadUrl),
+      headers: {'Content-Type': fileType},
+      body: fileBytes,
+    );
+
+    if (res.statusCode != 200) {
+      throw Exception('S3 upload failed: ${res.statusCode}');
+    }
+
+    return fileUrl;
+  }
 }

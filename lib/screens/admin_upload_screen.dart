@@ -8,6 +8,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'dart:convert';
 import 'package:path/path.dart' as p;
+import '../services/api_service.dart';
 
 class AdminUploadScreen extends StatefulWidget {
   final AppModel? app;
@@ -25,7 +26,7 @@ class _FileEntry {
   TextEditingController labelCtrl;
 
   _FileEntry({this.platformFile, required this.type, required String label})
-      : labelCtrl = TextEditingController(text: label);
+    : labelCtrl = TextEditingController(text: label);
 
   void dispose() => labelCtrl.dispose();
 }
@@ -37,7 +38,7 @@ class _AdminUploadScreenState extends State<AdminUploadScreen>
   final versionController = TextEditingController();
   final sizeController = TextEditingController();
   final developerController = TextEditingController();
-  final developerBioController = TextEditingController(); // ← NEW
+  final developerBioController = TextEditingController();
   final ratedForController = TextEditingController();
   final packageController = TextEditingController();
   String selectedCategory = "Productivity";
@@ -88,15 +89,36 @@ class _AdminUploadScreenState extends State<AdminUploadScreen>
     return map[type] ?? 'Download';
   }
 
+  static String _mimeType(String filename) {
+    final ext = p.extension(filename).toLowerCase().replaceFirst('.', '');
+    const map = {
+      'apk': 'application/vnd.android.package-archive',
+      'exe': 'application/x-msdownload',
+      'msi': 'application/x-msi',
+      'sh': 'application/x-sh',
+      'deb': 'application/vnd.debian.binary-package',
+      'rpm': 'application/x-rpm',
+      'appimage': 'application/x-executable',
+      'dmg': 'application/x-apple-diskimage',
+      'zip': 'application/zip',
+      'png': 'image/png',
+      'jpg': 'image/jpeg',
+      'jpeg': 'image/jpeg',
+      'webp': 'image/webp',
+    };
+    return map[ext] ?? 'application/octet-stream';
+  }
+
   // ── Lifecycle ──────────────────────────────────────────────────────────────
 
   @override
   void initState() {
     super.initState();
     _animCtrl = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 600));
-    _fadeAnim =
-        CurvedAnimation(parent: _animCtrl, curve: Curves.easeOut);
+      vsync: this,
+      duration: const Duration(milliseconds: 600),
+    );
+    _fadeAnim = CurvedAnimation(parent: _animCtrl, curve: Curves.easeOut);
     _slideAnim = Tween<Offset>(
       begin: const Offset(0, 0.05),
       end: Offset.zero,
@@ -115,10 +137,12 @@ class _AdminUploadScreenState extends State<AdminUploadScreen>
 
       for (final f in app.files) {
         final type = f['type'] as String? ?? 'other';
-        _fileEntries.add(_FileEntry(
-          type: type,
-          label: f['label'] as String? ?? _defaultLabel(type),
-        ));
+        _fileEntries.add(
+          _FileEntry(
+            type: type,
+            label: f['label'] as String? ?? _defaultLabel(type),
+          ),
+        );
       }
     }
   }
@@ -130,7 +154,7 @@ class _AdminUploadScreenState extends State<AdminUploadScreen>
     versionController.dispose();
     sizeController.dispose();
     developerController.dispose();
-    developerBioController.dispose(); // ← NEW
+    developerBioController.dispose();
     ratedForController.dispose();
     packageController.dispose();
     _animCtrl.dispose();
@@ -143,14 +167,19 @@ class _AdminUploadScreenState extends State<AdminUploadScreen>
   // ── File picking ───────────────────────────────────────────────────────────
 
   Future<void> pickIcon() async {
-    final r = await FilePicker.platform
-        .pickFiles(type: FileType.image, withData: true);
+    final r = await FilePicker.platform.pickFiles(
+      type: FileType.image,
+      withData: true,
+    );
     if (r != null) setState(() => iconFile = r.files.first);
   }
 
   Future<void> pickScreenshots() async {
     final r = await FilePicker.platform.pickFiles(
-        allowMultiple: true, type: FileType.image, withData: true);
+      allowMultiple: true,
+      type: FileType.image,
+      withData: true,
+    );
     if (r != null && r.files.isNotEmpty) {
       setState(() => screenshotFiles = r.files);
     }
@@ -160,7 +189,15 @@ class _AdminUploadScreenState extends State<AdminUploadScreen>
     final r = await FilePicker.platform.pickFiles(
       type: FileType.custom,
       allowedExtensions: [
-        'apk', 'exe', 'msi', 'sh', 'deb', 'rpm', 'appimage', 'dmg', 'zip',
+        'apk',
+        'exe',
+        'msi',
+        'sh',
+        'deb',
+        'rpm',
+        'appimage',
+        'dmg',
+        'zip',
       ],
       withData: true,
     );
@@ -193,97 +230,169 @@ class _AdminUploadScreenState extends State<AdminUploadScreen>
     if (token == null) return;
 
     if (packageController.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text("Package name is required"),
-        backgroundColor: Color(0xFFE53935),
-      ));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Package name is required"),
+          backgroundColor: Color(0xFFE53935),
+        ),
+      );
       return;
     }
 
     setState(() => uploading = true);
 
-    final uri = isEdit
-        ? Uri.parse("${ApiConfig.baseUrl}/api/admin/apps/${widget.app!.id}")
-        : Uri.parse("${ApiConfig.baseUrl}/api/admin/apps");
+    try {
+      final uri = isEdit
+          ? Uri.parse("${ApiConfig.baseUrl}/api/admin/apps/${widget.app!.id}")
+          : Uri.parse("${ApiConfig.baseUrl}/api/admin/apps");
 
-    final request = http.MultipartRequest(isEdit ? "PUT" : "POST", uri);
-    request.headers["Authorization"] = "Bearer $token";
+      // ── Step 1: Upload icon directly to S3 ─────────────────────────────
+      String? iconUrl;
+      if (iconFile != null) {
+        final mimeType = _mimeType(iconFile!.name);
 
-    request.fields["name"] = nameController.text;
-    request.fields["description"] = descController.text;
-    request.fields["version"] = versionController.text;
-    request.fields["category"] = selectedCategory;
-    request.fields["size"] = sizeController.text;
-    request.fields["developer"] = developerController.text;
-    request.fields["rated_for"] = ratedForController.text;
-    request.fields["package_name"] = packageController.text;
-    request.fields["bio"] = developerBioController.text; // ← NEW
-    if (!isEdit) request.fields["version_code"] = "1";
+        final presigned = await ApiService.getPresignedUrl(
+          fileName: iconFile!.name,
+          fileType: mimeType,
+          folder: 'icons',
+          token: token,
+        );
 
-    // Icon
-    if (iconFile != null) {
-      if (kIsWeb) {
-        request.files.add(http.MultipartFile.fromBytes(
-            "icon", iconFile!.bytes!, filename: iconFile!.name));
-      } else {
-        request.files
-            .add(await http.MultipartFile.fromPath("icon", iconFile!.path!));
+        iconUrl = await ApiService.uploadFileToS3(
+          uploadUrl: presigned['uploadUrl'],
+          fileUrl: presigned['fileUrl'],
+          fileBytes: iconFile!.bytes!,
+          fileType: mimeType,
+        );
       }
-    }
 
-    // Screenshots
-    for (final f in screenshotFiles) {
-      if (kIsWeb) {
-        request.files.add(http.MultipartFile.fromBytes(
-            "screenshots", f.bytes!, filename: f.name));
-      } else {
-        request.files.add(
-            await http.MultipartFile.fromPath("screenshots", f.path!));
+      // ── Step 2: Upload screenshots directly to S3 ───────────────────────
+      final List<String> screenshotUrls = [];
+      for (final f in screenshotFiles) {
+        final mimeType = _mimeType(f.name);
+
+        final presigned = await ApiService.getPresignedUrl(
+          fileName: f.name,
+          fileType: mimeType,
+          folder: 'screenshots',
+          token: token,
+        );
+
+        final url = await ApiService.uploadFileToS3(
+          uploadUrl: presigned['uploadUrl'],
+          fileUrl: presigned['fileUrl'],
+          fileBytes: f.bytes!,
+          fileType: mimeType,
+        );
+
+        screenshotUrls.add(url);
       }
-    }
 
-    // Dynamic files
-    for (int i = 0; i < _fileEntries.length; i++) {
-      final entry = _fileEntries[i];
-      request.fields["file_labels[$i]"] = entry.labelCtrl.text.trim();
-      request.fields["file_types[$i]"] = entry.type;
+      // ── Step 3: Upload app files directly to S3 ─────────────────────────
+      final List<String> fileUrls = [];
+      final List<String> fileLabels = [];
+      final List<String> fileTypes = [];
 
-      if (entry.platformFile != null) {
-        if (kIsWeb) {
-          request.files.add(http.MultipartFile.fromBytes(
-              "files", entry.platformFile!.bytes!,
-              filename: entry.platformFile!.name));
-        } else {
-          request.files.add(await http.MultipartFile.fromPath(
-              "files", entry.platformFile!.path!));
+      for (final entry in _fileEntries) {
+        fileLabels.add(entry.labelCtrl.text.trim());
+        fileTypes.add(entry.type);
+
+        if (entry.platformFile == null) {
+          fileUrls.add('');
+          continue;
         }
+
+        final mimeType = _mimeType(entry.platformFile!.name);
+
+        final presigned = await ApiService.getPresignedUrl(
+          fileName: entry.platformFile!.name,
+          fileType: mimeType,
+          folder: 'apps',
+          token: token,
+        );
+
+        final url = await ApiService.uploadFileToS3(
+          uploadUrl: presigned['uploadUrl'],
+          fileUrl: presigned['fileUrl'],
+          fileBytes: entry.platformFile!.bytes!,
+          fileType: mimeType,
+        );
+
+        fileUrls.add(url);
       }
-    }
 
-    final response = await request.send();
-    final responseBody = await response.stream.bytesToString();
-    setState(() => uploading = false);
+      // ── Step 4: Send pure JSON to backend ──────────────────────────────
+      final Map<String, dynamic> body = {
+        "name": nameController.text,
+        "description": descController.text,
+        "version": versionController.text,
+        "category": selectedCategory,
+        "size": sizeController.text,
+        "developer": developerController.text,
+        "rated_for": ratedForController.text,
+        "package_name": packageController.text,
+        "bio": developerBioController.text,
+        if (!isEdit) "version_code": "1",
+        if (iconUrl != null) "icon_url": iconUrl,
+        if (screenshotUrls.isNotEmpty) "screenshot_urls": screenshotUrls,
+        if (fileUrls.isNotEmpty) "file_urls": fileUrls,
+        if (fileLabels.isNotEmpty) "file_labels": fileLabels,
+        if (fileTypes.isNotEmpty) "file_types": fileTypes,
+      };
 
-    if (!mounted) return;
+      final response = isEdit
+          ? await http.put(
+              uri,
+              headers: {
+                "Authorization": "Bearer $token",
+                "Content-Type": "application/json",
+              },
+              body: jsonEncode(body),
+            )
+          : await http.post(
+              uri,
+              headers: {
+                "Authorization": "Bearer $token",
+                "Content-Type": "application/json",
+              },
+              body: jsonEncode(body),
+            );
 
-    if (response.statusCode == 200 || response.statusCode == 201) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(isEdit
-            ? "App updated successfully"
-            : "App uploaded successfully"),
-        backgroundColor: _purple,
-      ));
-      Navigator.pop(context, true);
-    } else {
-      String message = "Operation failed";
-      try {
-        final data = json.decode(responseBody);
-        message = data["error"] ?? message;
-      } catch (_) {}
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(message),
-        backgroundColor: const Color(0xFFE53935),
-      ));
+      if (!mounted) return;
+
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              isEdit ? "App updated successfully" : "App uploaded successfully",
+            ),
+            backgroundColor: _purple,
+          ),
+        );
+        Navigator.pop(context, true);
+      } else {
+        String message = "Operation failed";
+        try {
+          final data = json.decode(response.body);
+          message = data["error"] ?? message;
+        } catch (_) {}
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(message),
+            backgroundColor: const Color(0xFFE53935),
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text("Upload error: $e"),
+          backgroundColor: const Color(0xFFE53935),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => uploading = false);
     }
   }
 
@@ -300,47 +409,51 @@ class _AdminUploadScreenState extends State<AdminUploadScreen>
         elevation: 0,
         surfaceTintColor: Colors.white,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_rounded,
-              color: Color(0xFF1A1A1A)),
+          icon: const Icon(Icons.arrow_back_rounded, color: Color(0xFF1A1A1A)),
           onPressed: () => Navigator.pop(context),
         ),
-        title: Row(children: [
-          Container(
-            padding: const EdgeInsets.all(7),
-            decoration: BoxDecoration(
-              color: _purple.withValues(alpha: 0.10),
-              borderRadius: BorderRadius.circular(9),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(7),
+              decoration: BoxDecoration(
+                color: _purple.withValues(alpha: 0.10),
+                borderRadius: BorderRadius.circular(9),
+              ),
+              child: Icon(
+                isEdit ? Icons.edit_rounded : Icons.cloud_upload_rounded,
+                color: _purple,
+                size: 18,
+              ),
             ),
-            child: Icon(
-              isEdit ? Icons.edit_rounded : Icons.cloud_upload_rounded,
-              color: _purple,
-              size: 18,
-            ),
-          ),
-          const SizedBox(width: 10),
-          Text(
-            isEdit ? "Edit App" : "Upload App",
-            style: const TextStyle(
+            const SizedBox(width: 10),
+            Text(
+              isEdit ? "Edit App" : "Upload App",
+              style: const TextStyle(
                 color: Color(0xFF1A1A1A),
                 fontWeight: FontWeight.w700,
-                fontSize: 18),
-          ),
-          const SizedBox(width: 8),
-          Container(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-            decoration: BoxDecoration(
-              color: const Color(0xFFE8F5E9),
-              borderRadius: BorderRadius.circular(6),
+                fontSize: 18,
+              ),
             ),
-            child: const Text("ADMIN",
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: const Color(0xFFE8F5E9),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: const Text(
+                "ADMIN",
                 style: TextStyle(
-                    color: _purple,
-                    fontSize: 10,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 0.5)),
-          ),
-        ]),
+                  color: _purple,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0.5,
+                ),
+              ),
+            ),
+          ],
+        ),
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(1),
           child: Divider(height: 1, color: Colors.grey.shade100),
@@ -348,8 +461,7 @@ class _AdminUploadScreenState extends State<AdminUploadScreen>
       ),
       body: Center(
         child: SingleChildScrollView(
-          padding:
-              const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
           child: FadeTransition(
             opacity: _fadeAnim,
             child: SlideTransition(
@@ -361,13 +473,15 @@ class _AdminUploadScreenState extends State<AdminUploadScreen>
                   borderRadius: BorderRadius.circular(24),
                   boxShadow: [
                     BoxShadow(
-                        blurRadius: 30,
-                        offset: const Offset(0, 10),
-                        color: _purple.withValues(alpha: 0.07)),
+                      blurRadius: 30,
+                      offset: const Offset(0, 10),
+                      color: _purple.withValues(alpha: 0.07),
+                    ),
                     BoxShadow(
-                        blurRadius: 16,
-                        offset: const Offset(0, 4),
-                        color: Colors.black.withValues(alpha: 0.05)),
+                      blurRadius: 16,
+                      offset: const Offset(0, 4),
+                      color: Colors.black.withValues(alpha: 0.05),
+                    ),
                   ],
                 ),
                 child: Column(
@@ -377,7 +491,9 @@ class _AdminUploadScreenState extends State<AdminUploadScreen>
                     Container(
                       width: double.infinity,
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 28, vertical: 22),
+                        horizontal: 28,
+                        vertical: 22,
+                      ),
                       decoration: const BoxDecoration(
                         gradient: LinearGradient(
                           colors: [Color(0xFF6A1B9A), Color(0xFF4A148C)],
@@ -394,8 +510,9 @@ class _AdminUploadScreenState extends State<AdminUploadScreen>
                             ? "Update the app details below"
                             : "Fill in the app details to publish",
                         style: TextStyle(
-                            color: Colors.white.withValues(alpha: 0.92),
-                            fontSize: 13),
+                          color: Colors.white.withValues(alpha: 0.92),
+                          fontSize: 13,
+                        ),
                       ),
                     ),
 
@@ -406,51 +523,59 @@ class _AdminUploadScreenState extends State<AdminUploadScreen>
                         children: [
                           // ── App Info ──────────────────────────────
                           _sectionHeader(
-                              Icons.info_outline_rounded, "App Info"),
+                            Icons.info_outline_rounded,
+                            "App Info",
+                          ),
                           const SizedBox(height: 16),
                           _buildLabel("App Name"),
                           const SizedBox(height: 8),
-                          _buildField(nameController,
-                              "Provide a name for the app"),
+                          _buildField(
+                            nameController,
+                            "Provide a name for the app",
+                          ),
                           const SizedBox(height: 18),
                           _buildLabel("Description"),
                           const SizedBox(height: 8),
-                          _buildField(descController,
-                              "Describe what the app does...",
-                              maxLines: 3),
+                          _buildField(
+                            descController,
+                            "Describe what the app does...",
+                            maxLines: 3,
+                          ),
                           const SizedBox(height: 18),
-                          Row(children: [
-                            Expanded(
-                              child: Column(
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.start,
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     _buildLabel("Version"),
                                     const SizedBox(height: 8),
                                     _buildField(
-                                        versionController, "e.g. 1.0.0"),
-                                  ]),
-                            ),
-                            const SizedBox(width: 16),
-                            Expanded(
-                              child: Column(
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.start,
+                                      versionController,
+                                      "e.g. 1.0.0",
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(width: 16),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     _buildLabel("Size"),
                                     const SizedBox(height: 8),
-                                    _buildField(
-                                        sizeController, "e.g. 24 MB"),
-                                  ]),
-                            ),
-                          ]),
+                                    _buildField(sizeController, "e.g. 24 MB"),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
                           const SizedBox(height: 18),
                           _buildLabel("Developer"),
                           const SizedBox(height: 8),
-                          _buildField(
-                              developerController, "e.g. Acme Corp"),
+                          _buildField(developerController, "e.g. Acme Corp"),
 
-                          // ── Developer Bio (NEW) ───────────────────
+                          // ── Developer Bio ─────────────────────────
                           const SizedBox(height: 18),
                           _buildLabel("Developer Bio"),
                           const SizedBox(height: 8),
@@ -471,108 +596,130 @@ class _AdminUploadScreenState extends State<AdminUploadScreen>
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12),
                                 borderSide: BorderSide(
-                                    color: Colors.grey.shade200),
+                                  color: Colors.grey.shade200,
+                                ),
                               ),
                             ),
-                            items: [
-                              "Productivity",
-                              "Tools",
-                              "Education",
-                              "Utility",
-                              "Social"
-                            ]
-                                .map((c) => DropdownMenuItem(
-                                    value: c, child: Text(c)))
-                                .toList(),
+                            items:
+                                [
+                                      "Productivity",
+                                      "Tools",
+                                      "Education",
+                                      "Utility",
+                                      "Social",
+                                    ]
+                                    .map(
+                                      (c) => DropdownMenuItem(
+                                        value: c,
+                                        child: Text(c),
+                                      ),
+                                    )
+                                    .toList(),
                             onChanged: (v) =>
                                 setState(() => selectedCategory = v!),
                           ),
                           const SizedBox(height: 18),
-                          Row(children: [
-                            Expanded(
-                              child: Column(
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.start,
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     _buildLabel("Rated For"),
                                     const SizedBox(height: 8),
                                     _buildField(
-                                        ratedForController, "e.g. 3+, 12+"),
-                                  ]),
-                            ),
-                            const SizedBox(width: 16),
-                            Expanded(
-                              child: Column(
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.start,
+                                      ratedForController,
+                                      "e.g. 3+, 12+",
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(width: 16),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     _buildLabel("Package Name *"),
                                     const SizedBox(height: 8),
-                                    _buildField(packageController,
-                                        "Unique identifier"),
-                                  ]),
-                            ),
-                          ]),
+                                    _buildField(
+                                      packageController,
+                                      "Unique identifier",
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
 
                           const SizedBox(height: 32),
                           Divider(color: Colors.grey.shade100),
                           const SizedBox(height: 24),
 
                           // ── Assets ────────────────────────────────
-                          _sectionHeader(
-                              Icons.perm_media_rounded, "Assets"),
+                          _sectionHeader(Icons.perm_media_rounded, "Assets"),
                           const SizedBox(height: 16),
-                          Row(children: [
-                            Expanded(
-                              child: _assetButton(
-                                icon: Icons.image_rounded,
-                                label: "Pick Icon",
-                                onPressed: uploading ? null : pickIcon,
-                                selected: iconFile != null,
-                                selectedLabel: "Icon selected",
+                          Row(
+                            children: [
+                              Expanded(
+                                child: _assetButton(
+                                  icon: Icons.image_rounded,
+                                  label: "Pick Icon",
+                                  onPressed: uploading ? null : pickIcon,
+                                  selected: iconFile != null,
+                                  selectedLabel: "Icon selected",
+                                ),
                               ),
-                            ),
-                            const SizedBox(width: 14),
-                            Expanded(
-                              child: _assetButton(
-                                icon: Icons.photo_library_rounded,
-                                label: "Pick Screenshots",
-                                onPressed:
-                                    uploading ? null : pickScreenshots,
-                                selected: screenshotFiles.isNotEmpty,
-                                selectedLabel:
-                                    "${screenshotFiles.length} selected",
+                              const SizedBox(width: 14),
+                              Expanded(
+                                child: _assetButton(
+                                  icon: Icons.photo_library_rounded,
+                                  label: "Pick Screenshots",
+                                  onPressed: uploading ? null : pickScreenshots,
+                                  selected: screenshotFiles.isNotEmpty,
+                                  selectedLabel:
+                                      "${screenshotFiles.length} selected",
+                                ),
                               ),
-                            ),
-                          ]),
+                            ],
+                          ),
 
                           const SizedBox(height: 32),
                           Divider(color: Colors.grey.shade100),
                           const SizedBox(height: 24),
 
                           // ── Downloadable Files ────────────────────
-                          _sectionHeader(Icons.folder_zip_outlined,
-                              "Downloadable Files"),
+                          _sectionHeader(
+                            Icons.folder_zip_outlined,
+                            "Downloadable Files",
+                          ),
                           const SizedBox(height: 16),
 
                           ..._fileEntries.asMap().entries.map(
-                              (e) => _buildFileEntryCard(e.key, e.value)),
+                            (e) => _buildFileEntryCard(e.key, e.value),
+                          ),
 
                           OutlinedButton.icon(
                             onPressed: uploading ? null : _addFileEntry,
                             icon: const Icon(Icons.add_rounded, size: 18),
-                            label: const Text("Add File",
-                                style: TextStyle(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w600)),
+                            label: const Text(
+                              "Add File",
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
                             style: OutlinedButton.styleFrom(
                               foregroundColor: _purple,
                               side: BorderSide(
-                                  color: _purple.withValues(alpha: 0.4)),
+                                color: _purple.withValues(alpha: 0.4),
+                              ),
                               shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12)),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
                               padding: const EdgeInsets.symmetric(
-                                  vertical: 12, horizontal: 20),
+                                vertical: 12,
+                                horizontal: 20,
+                              ),
                             ),
                           ),
 
@@ -587,21 +734,23 @@ class _AdminUploadScreenState extends State<AdminUploadScreen>
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: _purple,
                                 foregroundColor: Colors.white,
-                                disabledBackgroundColor:
-                                    _purple.withValues(alpha: 0.5),
+                                disabledBackgroundColor: _purple.withValues(
+                                  alpha: 0.5,
+                                ),
                                 elevation: 0,
                                 shadowColor: Colors.transparent,
                                 shape: RoundedRectangleBorder(
-                                    borderRadius:
-                                        BorderRadius.circular(14)),
+                                  borderRadius: BorderRadius.circular(14),
+                                ),
                               ),
                               child: uploading
                                   ? const SizedBox(
                                       height: 22,
                                       width: 22,
                                       child: CircularProgressIndicator(
-                                          strokeWidth: 2.5,
-                                          color: Colors.white),
+                                        strokeWidth: 2.5,
+                                        color: Colors.white,
+                                      ),
                                     )
                                   : Row(
                                       mainAxisAlignment:
@@ -619,9 +768,10 @@ class _AdminUploadScreenState extends State<AdminUploadScreen>
                                               ? "Save Changes"
                                               : "Publish App",
                                           style: const TextStyle(
-                                              fontSize: 16,
-                                              fontWeight: FontWeight.w700,
-                                              letterSpacing: 0.3),
+                                            fontSize: 16,
+                                            fontWeight: FontWeight.w700,
+                                            letterSpacing: 0.3,
+                                          ),
                                         ),
                                       ],
                                     ),
@@ -660,87 +810,97 @@ class _AdminUploadScreenState extends State<AdminUploadScreen>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(children: [
-            Expanded(
-              child: OutlinedButton.icon(
-                onPressed:
-                    uploading ? null : () => _pickFileForEntry(index),
-                icon: Icon(
-                  hasFile
-                      ? Icons.check_circle_rounded
-                      : Icons.attach_file_rounded,
-                  size: 16,
-                  color: hasFile ? _purple : Colors.grey.shade500,
-                ),
-                label: Text(
-                  hasFile ? (entry.platformFile!.name) : "Choose file",
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: hasFile ? _purple : Colors.grey.shade600,
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: uploading ? null : () => _pickFileForEntry(index),
+                  icon: Icon(
+                    hasFile
+                        ? Icons.check_circle_rounded
+                        : Icons.attach_file_rounded,
+                    size: 16,
+                    color: hasFile ? _purple : Colors.grey.shade500,
+                  ),
+                  label: Text(
+                    hasFile ? (entry.platformFile!.name) : "Choose file",
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: hasFile ? _purple : Colors.grey.shade600,
+                    ),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    backgroundColor: hasFile
+                        ? _purple.withValues(alpha: 0.05)
+                        : Colors.white,
+                    side: BorderSide(
+                      color: hasFile
+                          ? _purple.withValues(alpha: 0.4)
+                          : Colors.grey.shade300,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    padding: const EdgeInsets.symmetric(
+                      vertical: 10,
+                      horizontal: 12,
+                    ),
                   ),
                 ),
-                style: OutlinedButton.styleFrom(
-                  backgroundColor: hasFile
-                      ? _purple.withValues(alpha: 0.05)
-                      : Colors.white,
-                  side: BorderSide(
-                    color: hasFile
-                        ? _purple.withValues(alpha: 0.4)
-                        : Colors.grey.shade300,
-                  ),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10)),
-                  padding: const EdgeInsets.symmetric(
-                      vertical: 10, horizontal: 12),
+              ),
+              const SizedBox(width: 10),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 6,
                 ),
-              ),
-            ),
-            const SizedBox(width: 10),
-            Container(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 10, vertical: 6),
-              decoration: BoxDecoration(
-                color: _purple.withValues(alpha: 0.08),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Text(
-                entry.type.toUpperCase(),
-                style: const TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                    color: _purple),
-              ),
-            ),
-            const SizedBox(width: 8),
-            GestureDetector(
-              onTap: uploading ? null : () => _removeFileEntry(index),
-              child: Container(
-                padding: const EdgeInsets.all(6),
                 decoration: BoxDecoration(
-                  color: Colors.red.shade50,
+                  color: _purple.withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: Icon(Icons.close_rounded,
-                    size: 16, color: Colors.red.shade400),
+                child: Text(
+                  entry.type.toUpperCase(),
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: _purple,
+                  ),
+                ),
               ),
-            ),
-          ]),
+              const SizedBox(width: 8),
+              GestureDetector(
+                onTap: uploading ? null : () => _removeFileEntry(index),
+                child: Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: Colors.red.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Icon(
+                    Icons.close_rounded,
+                    size: 16,
+                    color: Colors.red.shade400,
+                  ),
+                ),
+              ),
+            ],
+          ),
           const SizedBox(height: 10),
           TextField(
             controller: entry.labelCtrl,
-            style: const TextStyle(
-                fontSize: 13, fontWeight: FontWeight.w500),
+            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
             decoration: InputDecoration(
               hintText: "Label  (e.g. Android APK, Windows Installer)",
-              hintStyle: TextStyle(
-                  color: Colors.grey.shade400, fontSize: 13),
+              hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 13),
               filled: true,
               fillColor: Colors.white,
               isDense: true,
               contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 12, vertical: 10),
+                horizontal: 12,
+                vertical: 10,
+              ),
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(10),
                 borderSide: BorderSide(color: Colors.grey.shade200),
@@ -751,8 +911,7 @@ class _AdminUploadScreenState extends State<AdminUploadScreen>
               ),
               focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(10),
-                borderSide:
-                    const BorderSide(color: _purple, width: 1.5),
+                borderSide: const BorderSide(color: _purple, width: 1.5),
               ),
             ),
           ),
@@ -764,48 +923,59 @@ class _AdminUploadScreenState extends State<AdminUploadScreen>
   // ── Shared UI helpers ──────────────────────────────────────────────────────
 
   Widget _sectionHeader(IconData icon, String label) {
-    return Row(children: [
-      Container(
-        padding: const EdgeInsets.all(7),
-        decoration: BoxDecoration(
-          color: const Color(0xFF6A1B9A).withValues(alpha: 0.10),
-          borderRadius: BorderRadius.circular(8),
+    return Row(
+      children: [
+        Container(
+          padding: const EdgeInsets.all(7),
+          decoration: BoxDecoration(
+            color: const Color(0xFF6A1B9A).withValues(alpha: 0.10),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Icon(icon, color: const Color(0xFF6A1B9A), size: 16),
         ),
-        child: Icon(icon, color: const Color(0xFF6A1B9A), size: 16),
-      ),
-      const SizedBox(width: 10),
-      Text(label,
+        const SizedBox(width: 10),
+        Text(
+          label,
           style: const TextStyle(
-              fontSize: 15,
-              fontWeight: FontWeight.w700,
-              color: Color(0xFF1A1A1A))),
-    ]);
+            fontSize: 15,
+            fontWeight: FontWeight.w700,
+            color: Color(0xFF1A1A1A),
+          ),
+        ),
+      ],
+    );
   }
 
   Widget _buildLabel(String text) {
-    return Text(text,
-        style: const TextStyle(
-            fontSize: 13,
-            fontWeight: FontWeight.w600,
-            color: Color(0xFF424242),
-            letterSpacing: 0.2));
+    return Text(
+      text,
+      style: const TextStyle(
+        fontSize: 13,
+        fontWeight: FontWeight.w600,
+        color: Color(0xFF424242),
+        letterSpacing: 0.2,
+      ),
+    );
   }
 
-  Widget _buildField(TextEditingController ctrl, String hint,
-      {int maxLines = 1}) {
+  Widget _buildField(
+    TextEditingController ctrl,
+    String hint, {
+    int maxLines = 1,
+  }) {
     return TextField(
       controller: ctrl,
       maxLines: maxLines,
-      style:
-          const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
       decoration: InputDecoration(
         hintText: hint,
-        hintStyle:
-            TextStyle(color: Colors.grey.shade400, fontSize: 14),
+        hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 14),
         filled: true,
         fillColor: const Color(0xFFF5FAF6),
         contentPadding: const EdgeInsets.symmetric(
-            horizontal: 16, vertical: 13),
+          horizontal: 16,
+          vertical: 13,
+        ),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
           borderSide: BorderSide(color: Colors.grey.shade200),
@@ -816,8 +986,7 @@ class _AdminUploadScreenState extends State<AdminUploadScreen>
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(
-              color: Color(0xFF6A1B9A), width: 1.8),
+          borderSide: const BorderSide(color: Color(0xFF6A1B9A), width: 1.8),
         ),
       ),
     );
@@ -849,9 +1018,9 @@ class _AdminUploadScreenState extends State<AdminUploadScreen>
             width: selected ? 1.5 : 1,
           ),
           shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12)),
-          padding: const EdgeInsets.symmetric(
-              vertical: 14, horizontal: 16),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
         ),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -859,9 +1028,7 @@ class _AdminUploadScreenState extends State<AdminUploadScreen>
             Icon(
               selected ? Icons.check_circle_rounded : icon,
               size: 18,
-              color: selected
-                  ? const Color(0xFF6A1B9A)
-                  : Colors.grey.shade500,
+              color: selected ? const Color(0xFF6A1B9A) : Colors.grey.shade500,
             ),
             const SizedBox(width: 8),
             Flexible(
