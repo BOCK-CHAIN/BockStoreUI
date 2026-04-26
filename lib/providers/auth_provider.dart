@@ -20,10 +20,18 @@ class AuthProvider extends ChangeNotifier {
   bool get isAdmin => _user?.isAdmin ?? false;
 
   Future<void> restoreSession() async {
-    final session = await _authService.restoreSession();
-    if (session != null) {
-      _token = session['token'];
-      _user = session['user'];
+    try {
+      final session = await _authService.restoreSession();
+      if (session != null &&
+          session['token'] is String &&
+          session['user'] is UserModel) {
+        _token = session['token'] as String;
+        _user = session['user'] as UserModel;
+      }
+    } catch (_) {
+      _token = null;
+      _user = null;
+    } finally {
       notifyListeners();
     }
   }

@@ -37,13 +37,24 @@ class AuthService {
   }
 
   Future<Map<String, dynamic>?> restoreSession() async {
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString(_tokenKey);
-    final userStr = prefs.getString(_userKey);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString(_tokenKey);
+      final userStr = prefs.getString(_userKey);
 
-    if (token == null || userStr == null) return null;
+      if (token == null || userStr == null) return null;
 
-    return {'token': token, 'user': UserModel.fromJson(jsonDecode(userStr))};
+      final userMap = jsonDecode(userStr);
+      if (userMap is! Map<String, dynamic>) return null;
+
+      return {'token': token, 'user': UserModel.fromJson(userMap)};
+    } catch (_) {
+      // Corrupted data — clear it so the bad state doesn't persist
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_tokenKey);
+      await prefs.remove(_userKey);
+      return null;
+    }
   }
 
   Future<Map<String, dynamic>> register(

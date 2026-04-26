@@ -4,16 +4,13 @@ import 'dart:io' show Platform;
 class ApiConfig {
   static String get baseUrl {
     if (kIsWeb) {
-      return "http://localhost:3000";
+      return "https://bock-store-backend.vercel.app";
     }
 
     if (Platform.isAndroid) {
-      const emulatorHost = "10.0.2.2";
-
-      final host = emulatorHost;
-      return "http://$host:3000";
+      return "https://bock-store-backend.vercel.app";
     }
 
-    return "http://localhost:3000";
+    return "https://bock-store-backend.vercel.app";
   }
 }

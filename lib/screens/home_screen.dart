@@ -419,19 +419,13 @@ class _HomeScreenState extends State<HomeScreen>
           ? Row(
               children: [
                 _buildDesktopSidebar(),
-                Expanded(
-                  child: apps.isEmpty
-                      ? _emptyState()
-                      : selectedIndex == 0
-                      ? _buildDesktopGrid(width - _kRailWidth)
-                      : getMobileBody(),
-                ),
+                Expanded(child: apps.isEmpty ? _emptyState() : getMobileBody()),
               ],
             )
           : Center(
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 1300),
-                child: apps.isEmpty ? _emptyState() : getMobileBody(),
+                child: getMobileBody(),
               ),
             ),
     );
