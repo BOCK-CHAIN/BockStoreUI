@@ -1,11 +1,13 @@
+// ignore_for_file: deprecated_member_use
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../providers/auth_provider.dart';
-import '../services/api_service.dart';
 import '../models/app_model.dart';
-import '../config/api_config.dart';
+import '../services/api_service.dart';
+import '../providers/auth_provider.dart';
 import '../config/url_helper.dart';
 import 'app_detail_screen.dart';
+import '../theme/bock_colors.dart';
 
 class MyAppsScreen extends StatefulWidget {
   const MyAppsScreen({super.key});
@@ -18,21 +20,26 @@ class _MyAppsScreenState extends State<MyAppsScreen>
     with SingleTickerProviderStateMixin {
   List<AppModel> apps = [];
   bool loading = true;
-
-  static const _purple = Color(0xFF6A1B9A);
+  String error = '';
 
   late AnimationController _animCtrl;
   late Animation<double> _fadeAnim;
+
+  Color get _bg => BockColors.bgDark;
+  Color get _card => BockColors.cardDark;
+  Color get _border => BockColors.borderDark;
+  Color get _textPrimary => BockColors.textPrimaryDark;
+  Color get _textSecondary => BockColors.textSecondaryDark;
 
   @override
   void initState() {
     super.initState();
     _animCtrl = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 500),
+      duration: const Duration(milliseconds: 450),
     );
     _fadeAnim = CurvedAnimation(parent: _animCtrl, curve: Curves.easeOut);
-    loadApps();
+    _loadApps();
   }
 
   @override
@@ -41,43 +48,105 @@ class _MyAppsScreenState extends State<MyAppsScreen>
     super.dispose();
   }
 
-  Future<void> loadApps() async {
-    final auth = context.read<AuthProvider>();
-    final data = await ApiService.fetchMyApps(auth.token!);
+  Future<void> _loadApps() async {
     setState(() {
-      apps = data.map((e) => AppModel.fromJson(e)).toList();
-      loading = false;
+      loading = true;
+      error = '';
     });
-    _animCtrl.forward();
+    try {
+      final auth = context.read<AuthProvider>();
+      final data = await ApiService.fetchMyApps(auth.token!);
+      if (!mounted) return;
+      setState(() {
+        apps = data.map((e) => AppModel.fromJson(e)).toList();
+        loading = false;
+      });
+      _animCtrl.forward();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        loading = false;
+        error = 'Failed to load apps. Please try again.';
+      });
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF0F4F0),
+      backgroundColor: _bg,
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor: BockColors.surfaceDark,
         elevation: 0,
-        surfaceTintColor: Colors.white,
+        surfaceTintColor: Colors.transparent,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_rounded, color: Color(0xFF1A1A1A)),
+          icon: Icon(Icons.arrow_back_rounded, color: _textPrimary),
           onPressed: () => Navigator.pop(context),
         ),
-        title: const Text(
-          "My Apps",
+        title: Text(
+          'My Apps',
           style: TextStyle(
-            color: Color(0xFF1A1A1A),
+            color: _textPrimary,
             fontWeight: FontWeight.w700,
-            fontSize: 18,
+            fontSize: 17,
           ),
         ),
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(1),
-          child: Divider(height: 1, color: Colors.grey.shade100),
+          child: Divider(height: 1, color: _border),
         ),
       ),
       body: loading
-          ? const Center(child: CircularProgressIndicator(color: _purple))
+          ? const Center(
+              child: CircularProgressIndicator(color: BockColors.purple),
+            )
+          : error.isNotEmpty
+          ? Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(20),
+                    decoration: BoxDecoration(
+                      color: BockColors.error.withValues(alpha: 0.08),
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: BockColors.error.withValues(alpha: 0.15),
+                      ),
+                    ),
+                    child: Icon(
+                      Icons.error_outline_rounded,
+                      size: 40,
+                      color: BockColors.error.withValues(alpha: 0.7),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    error,
+                    style: TextStyle(fontSize: 14, color: _textSecondary),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 16),
+                  ElevatedButton.icon(
+                    onPressed: _loadApps,
+                    icon: const Icon(Icons.refresh_rounded, size: 18),
+                    label: const Text('Retry'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: BockColors.purple,
+                      foregroundColor: Colors.white,
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 24,
+                        vertical: 12,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            )
           : apps.isEmpty
           ? Center(
               child: Column(
@@ -86,28 +155,31 @@ class _MyAppsScreenState extends State<MyAppsScreen>
                   Container(
                     padding: const EdgeInsets.all(24),
                     decoration: BoxDecoration(
-                      color: _purple.withValues(alpha: 0.08),
+                      color: BockColors.purple.withValues(alpha: 0.08),
                       shape: BoxShape.circle,
+                      border: Border.all(
+                        color: BockColors.purple.withValues(alpha: 0.15),
+                      ),
                     ),
                     child: const Icon(
                       Icons.apps_outlined,
-                      size: 48,
-                      color: _purple,
+                      size: 44,
+                      color: BockColors.purpleLight,
                     ),
                   ),
                   const SizedBox(height: 20),
-                  const Text(
-                    "No installed apps yet",
+                  Text(
+                    'No installed apps yet',
                     style: TextStyle(
-                      fontSize: 17,
+                      fontSize: 16,
                       fontWeight: FontWeight.w600,
-                      color: Color(0xFF424242),
+                      color: _textPrimary,
                     ),
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 6),
                   Text(
-                    "Apps you install will appear here",
-                    style: TextStyle(fontSize: 13, color: Colors.grey.shade500),
+                    'Apps you install will appear here.',
+                    style: TextStyle(fontSize: 13, color: _textSecondary),
                   ),
                 ],
               ),
@@ -115,24 +187,16 @@ class _MyAppsScreenState extends State<MyAppsScreen>
           : FadeTransition(
               opacity: _fadeAnim,
               child: ListView.builder(
-                padding: const EdgeInsets.fromLTRB(16, 20, 16, 20),
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 20),
                 itemCount: apps.length,
-                itemBuilder: (context, index) {
-                  final app = apps[index];
+                itemBuilder: (_, i) {
+                  final app = apps[i];
                   return Container(
-                    margin: const EdgeInsets.only(bottom: 12),
+                    margin: const EdgeInsets.only(bottom: 10),
                     decoration: BoxDecoration(
-                      color: Colors.white,
+                      color: _card,
                       borderRadius: BorderRadius.circular(16),
-                      boxShadow: [
-                        BoxShadow(
-                          color: const Color(
-                            0xFF000000,
-                          ).withValues(alpha: 0.04),
-                          blurRadius: 10,
-                          offset: const Offset(0, 3),
-                        ),
-                      ],
+                      border: Border.all(color: _border),
                     ),
                     child: Material(
                       color: Colors.transparent,
@@ -150,51 +214,50 @@ class _MyAppsScreenState extends State<MyAppsScreen>
                           padding: const EdgeInsets.all(14),
                           child: Row(
                             children: [
-                              // App icon
                               ClipRRect(
-                                borderRadius: BorderRadius.circular(14),
+                                borderRadius: BorderRadius.circular(13),
                                 child: Image.network(
                                   getFullUrl(app.iconUrl),
-                                  width: 58,
-                                  height: 58,
+                                  width: 56,
+                                  height: 56,
                                   fit: BoxFit.cover,
                                   errorBuilder: (_, __, ___) => Container(
-                                    width: 58,
-                                    height: 58,
+                                    width: 56,
+                                    height: 56,
                                     decoration: BoxDecoration(
-                                      color: const Color(0xFFF5FAF6),
-                                      borderRadius: BorderRadius.circular(14),
+                                      color: BockColors.purpleDim.withValues(
+                                        alpha: 0.3,
+                                      ),
+                                      borderRadius: BorderRadius.circular(13),
                                     ),
                                     child: const Icon(
                                       Icons.apps_rounded,
-                                      color: _purple,
+                                      color: BockColors.purpleLight,
                                     ),
                                   ),
                                 ),
                               ),
                               const SizedBox(width: 14),
-
-                              // Info
                               Expanded(
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Text(
                                       app.name,
-                                      style: const TextStyle(
+                                      style: TextStyle(
                                         fontWeight: FontWeight.w700,
                                         fontSize: 15,
-                                        color: Color(0xFF1A1A1A),
+                                        color: _textPrimary,
                                       ),
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
                                     ),
-                                    const SizedBox(height: 4),
+                                    const SizedBox(height: 3),
                                     Text(
-                                      app.developer ?? "Unknown Developer",
+                                      app.developer ?? 'Unknown Developer',
                                       style: const TextStyle(
                                         fontSize: 12,
-                                        color: _purple,
+                                        color: BockColors.purpleLight,
                                         fontWeight: FontWeight.w500,
                                       ),
                                       maxLines: 1,
@@ -209,27 +272,30 @@ class _MyAppsScreenState extends State<MyAppsScreen>
                                             vertical: 3,
                                           ),
                                           decoration: BoxDecoration(
-                                            color: const Color(0xFFF5FAF6),
+                                            color: BockColors.purple.withValues(
+                                              alpha: 0.10,
+                                            ),
                                             borderRadius: BorderRadius.circular(
                                               6,
                                             ),
                                             border: Border.all(
-                                              color: const Color(0xFFE0EEE5),
+                                              color: BockColors.purple
+                                                  .withValues(alpha: 0.2),
                                             ),
                                           ),
                                           child: Row(
                                             children: [
                                               const Icon(
                                                 Icons.download_rounded,
-                                                size: 12,
-                                                color: _purple,
+                                                size: 11,
+                                                color: BockColors.purpleLight,
                                               ),
                                               const SizedBox(width: 4),
                                               Text(
-                                                "${app.downloadCount} download${app.downloadCount == 1 ? '' : 's'}",
+                                                '${app.downloadCount} download${app.downloadCount == 1 ? '' : 's'}',
                                                 style: const TextStyle(
                                                   fontSize: 11,
-                                                  color: Color(0xFF424242),
+                                                  color: BockColors.purpleLight,
                                                   fontWeight: FontWeight.w500,
                                                 ),
                                               ),
@@ -239,10 +305,12 @@ class _MyAppsScreenState extends State<MyAppsScreen>
                                         if (app.version != null) ...[
                                           const SizedBox(width: 8),
                                           Text(
-                                            "v${app.version}",
-                                            style: const TextStyle(
+                                            'v${app.version}',
+                                            style: TextStyle(
                                               fontSize: 11,
-                                              color: Color(0xFFBDBDBD),
+                                              color: _textSecondary.withValues(
+                                                alpha: 0.7,
+                                              ),
                                             ),
                                           ),
                                         ],
@@ -251,10 +319,9 @@ class _MyAppsScreenState extends State<MyAppsScreen>
                                   ],
                                 ),
                               ),
-
-                              const Icon(
+                              Icon(
                                 Icons.chevron_right_rounded,
-                                color: Color(0xFFBDBDBD),
+                                color: _textSecondary.withValues(alpha: 0.4),
                                 size: 20,
                               ),
                             ],

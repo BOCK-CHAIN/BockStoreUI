@@ -5,21 +5,19 @@ import 'package:play_store_app/config/api_config.dart';
 import '../providers/auth_provider.dart';
 import '../models/app_model.dart';
 import 'package:file_picker/file_picker.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'dart:convert';
 import 'package:path/path.dart' as p;
 import '../services/api_service.dart';
+import '../theme/bock_colors.dart';
 
 class AdminUploadScreen extends StatefulWidget {
   final AppModel? app;
-
   const AdminUploadScreen({super.key, this.app});
 
   @override
   State<AdminUploadScreen> createState() => _AdminUploadScreenState();
 }
 
-// Holds one file entry (picked file + editable metadata)
 class _FileEntry {
   PlatformFile? platformFile;
   String type;
@@ -41,23 +39,18 @@ class _AdminUploadScreenState extends State<AdminUploadScreen>
   final developerBioController = TextEditingController();
   final ratedForController = TextEditingController();
   final packageController = TextEditingController();
-  String selectedCategory = "Productivity";
+  String selectedCategory = 'Productivity';
 
   PlatformFile? iconFile;
   List<PlatformFile> screenshotFiles = [];
-
   final List<_FileEntry> _fileEntries = [];
 
   bool uploading = false;
   bool get isEdit => widget.app != null;
 
-  static const _purple = Color(0xFF6A1B9A);
-
   late AnimationController _animCtrl;
   late Animation<double> _fadeAnim;
   late Animation<Offset> _slideAnim;
-
-  // ── Helpers ────────────────────────────────────────────────────────────────
 
   static String _detectType(String filename) {
     final ext = p.extension(filename).toLowerCase().replaceFirst('.', '');
@@ -109,14 +102,12 @@ class _AdminUploadScreenState extends State<AdminUploadScreen>
     return map[ext] ?? 'application/octet-stream';
   }
 
-  // ── Lifecycle ──────────────────────────────────────────────────────────────
-
   @override
   void initState() {
     super.initState();
     _animCtrl = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 600),
+      duration: const Duration(milliseconds: 500),
     );
     _fadeAnim = CurvedAnimation(parent: _animCtrl, curve: Curves.easeOut);
     _slideAnim = Tween<Offset>(
@@ -134,7 +125,6 @@ class _AdminUploadScreenState extends State<AdminUploadScreen>
       developerController.text = app.developer ?? '';
       ratedForController.text = app.ratedFor ?? '';
       packageController.text = app.packageName;
-
       for (final f in app.files) {
         final type = f['type'] as String? ?? 'other';
         _fileEntries.add(
@@ -164,8 +154,6 @@ class _AdminUploadScreenState extends State<AdminUploadScreen>
     super.dispose();
   }
 
-  // ── File picking ───────────────────────────────────────────────────────────
-
   Future<void> pickIcon() async {
     final r = await FilePicker.platform.pickFiles(
       type: FileType.image,
@@ -180,9 +168,8 @@ class _AdminUploadScreenState extends State<AdminUploadScreen>
       type: FileType.image,
       withData: true,
     );
-    if (r != null && r.files.isNotEmpty) {
+    if (r != null && r.files.isNotEmpty)
       setState(() => screenshotFiles = r.files);
-    }
   }
 
   Future<void> _pickFileForEntry(int index) async {
@@ -207,8 +194,7 @@ class _AdminUploadScreenState extends State<AdminUploadScreen>
     setState(() {
       _fileEntries[index].platformFile = file;
       _fileEntries[index].type = type;
-      final label = _fileEntries[index].labelCtrl.text.trim();
-      if (label.isEmpty || label == 'Download') {
+      if (_fileEntries[index].labelCtrl.text.trim().isEmpty) {
         _fileEntries[index].labelCtrl.text = _defaultLabel(type);
       }
     });
@@ -222,8 +208,6 @@ class _AdminUploadScreenState extends State<AdminUploadScreen>
     setState(() => _fileEntries.removeAt(index));
   }
 
-  // ── Submit ─────────────────────────────────────────────────────────────────
-
   Future<void> submit() async {
     final auth = context.read<AuthProvider>();
     final token = auth.token;
@@ -232,8 +216,8 @@ class _AdminUploadScreenState extends State<AdminUploadScreen>
     if (packageController.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text("Package name is required"),
-          backgroundColor: Color(0xFFE53935),
+          content: Text('Package name is required'),
+          backgroundColor: BockColors.error,
         ),
       );
       return;
@@ -243,120 +227,98 @@ class _AdminUploadScreenState extends State<AdminUploadScreen>
 
     try {
       final uri = isEdit
-          ? Uri.parse("${ApiConfig.baseUrl}/api/admin/apps/${widget.app!.id}")
-          : Uri.parse("${ApiConfig.baseUrl}/api/admin/apps");
+          ? Uri.parse('${ApiConfig.baseUrl}/api/admin/apps/${widget.app!.id}')
+          : Uri.parse('${ApiConfig.baseUrl}/api/admin/apps');
 
-      // ── Step 1: Upload icon directly to S3 ─────────────────────────────
       String? iconUrl;
       if (iconFile != null) {
-        final mimeType = _mimeType(iconFile!.name);
-
+        final mime = _mimeType(iconFile!.name);
         final presigned = await ApiService.getPresignedUrl(
           fileName: iconFile!.name,
-          fileType: mimeType,
+          fileType: mime,
           folder: 'icons',
           token: token,
         );
-
         iconUrl = await ApiService.uploadFileToS3(
           uploadUrl: presigned['uploadUrl'],
           fileUrl: presigned['fileUrl'],
           fileBytes: iconFile!.bytes!,
-          fileType: mimeType,
+          fileType: mime,
         );
       }
 
-      // ── Step 2: Upload screenshots directly to S3 ───────────────────────
-      final List<String> screenshotUrls = [];
+      final screenshotUrls = <String>[];
       for (final f in screenshotFiles) {
-        final mimeType = _mimeType(f.name);
-
+        final mime = _mimeType(f.name);
         final presigned = await ApiService.getPresignedUrl(
           fileName: f.name,
-          fileType: mimeType,
+          fileType: mime,
           folder: 'screenshots',
           token: token,
         );
-
-        final url = await ApiService.uploadFileToS3(
-          uploadUrl: presigned['uploadUrl'],
-          fileUrl: presigned['fileUrl'],
-          fileBytes: f.bytes!,
-          fileType: mimeType,
+        screenshotUrls.add(
+          await ApiService.uploadFileToS3(
+            uploadUrl: presigned['uploadUrl'],
+            fileUrl: presigned['fileUrl'],
+            fileBytes: f.bytes!,
+            fileType: mime,
+          ),
         );
-
-        screenshotUrls.add(url);
       }
 
-      // ── Step 3: Upload app files directly to S3 ─────────────────────────
-      final List<String> fileUrls = [];
-      final List<String> fileLabels = [];
-      final List<String> fileTypes = [];
+      final fileUrls = <String>[];
+      final fileLabels = <String>[];
+      final fileTypes = <String>[];
 
       for (final entry in _fileEntries) {
-        fileLabels.add(entry.labelCtrl.text.trim());
-        fileTypes.add(entry.type);
+        // FIX: skip entries that have no new file picked (existing files in
+        // edit mode) — sending an empty URL crashes the backend
+        if (entry.platformFile == null) continue;
 
-        if (entry.platformFile == null) {
-          fileUrls.add('');
-          continue;
-        }
-
-        final mimeType = _mimeType(entry.platformFile!.name);
-
+        final mime = _mimeType(entry.platformFile!.name);
         final presigned = await ApiService.getPresignedUrl(
           fileName: entry.platformFile!.name,
-          fileType: mimeType,
+          fileType: mime,
           folder: 'apps',
           token: token,
         );
-
-        final url = await ApiService.uploadFileToS3(
+        final uploadedUrl = await ApiService.uploadFileToS3(
           uploadUrl: presigned['uploadUrl'],
           fileUrl: presigned['fileUrl'],
           fileBytes: entry.platformFile!.bytes!,
-          fileType: mimeType,
+          fileType: mime,
         );
 
-        fileUrls.add(url);
+        fileUrls.add(uploadedUrl);
+        fileLabels.add(entry.labelCtrl.text.trim());
+        fileTypes.add(entry.type);
       }
 
-      // ── Step 4: Send pure JSON to backend ──────────────────────────────
-      final Map<String, dynamic> body = {
-        "name": nameController.text,
-        "description": descController.text,
-        "version": versionController.text,
-        "category": selectedCategory,
-        "size": sizeController.text,
-        "developer": developerController.text,
-        "rated_for": ratedForController.text,
-        "package_name": packageController.text,
-        "bio": developerBioController.text,
-        if (!isEdit) "version_code": "1",
-        if (iconUrl != null) "icon_url": iconUrl,
-        if (screenshotUrls.isNotEmpty) "screenshot_urls": screenshotUrls,
-        if (fileUrls.isNotEmpty) "file_urls": fileUrls,
-        if (fileLabels.isNotEmpty) "file_labels": fileLabels,
-        if (fileTypes.isNotEmpty) "file_types": fileTypes,
+      final body = <String, dynamic>{
+        'name': nameController.text,
+        'description': descController.text,
+        'version': versionController.text,
+        'category': selectedCategory,
+        'size': sizeController.text,
+        'developer': developerController.text,
+        'rated_for': ratedForController.text,
+        'package_name': packageController.text,
+        'bio': developerBioController.text,
+        if (!isEdit) 'version_code': '1',
+        if (iconUrl != null) 'icon_url': iconUrl,
+        if (screenshotUrls.isNotEmpty) 'screenshot_urls': screenshotUrls,
+        if (fileUrls.isNotEmpty) 'file_urls': fileUrls,
+        if (fileLabels.isNotEmpty) 'file_labels': fileLabels,
+        if (fileTypes.isNotEmpty) 'file_types': fileTypes,
       };
 
+      final headers = {
+        'Authorization': 'Bearer $token',
+        'Content-Type': 'application/json',
+      };
       final response = isEdit
-          ? await http.put(
-              uri,
-              headers: {
-                "Authorization": "Bearer $token",
-                "Content-Type": "application/json",
-              },
-              body: jsonEncode(body),
-            )
-          : await http.post(
-              uri,
-              headers: {
-                "Authorization": "Bearer $token",
-                "Content-Type": "application/json",
-              },
-              body: jsonEncode(body),
-            );
+          ? await http.put(uri, headers: headers, body: jsonEncode(body))
+          : await http.post(uri, headers: headers, body: jsonEncode(body));
 
       if (!mounted) return;
 
@@ -364,31 +326,29 @@ class _AdminUploadScreenState extends State<AdminUploadScreen>
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              isEdit ? "App updated successfully" : "App uploaded successfully",
+              isEdit
+                  ? 'App updated successfully'
+                  : 'App published successfully',
             ),
-            backgroundColor: _purple,
+            backgroundColor: BockColors.purple,
           ),
         );
         Navigator.pop(context, true);
       } else {
-        String message = "Operation failed";
+        String message = 'Operation failed';
         try {
-          final data = json.decode(response.body);
-          message = data["error"] ?? message;
+          message = json.decode(response.body)['error'] ?? message;
         } catch (_) {}
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(message),
-            backgroundColor: const Color(0xFFE53935),
-          ),
+          SnackBar(content: Text(message), backgroundColor: BockColors.error),
         );
       }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text("Upload error: $e"),
-          backgroundColor: const Color(0xFFE53935),
+          content: Text('Upload error: $e'),
+          backgroundColor: BockColors.error,
         ),
       );
     } finally {
@@ -396,20 +356,21 @@ class _AdminUploadScreenState extends State<AdminUploadScreen>
     }
   }
 
-  // ── Build ──────────────────────────────────────────────────────────────────
-
   @override
   Widget build(BuildContext context) {
     final width = MediaQuery.of(context).size.width;
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF0F4F0),
+      backgroundColor: BockColors.bgDark,
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor: BockColors.surfaceDark,
         elevation: 0,
-        surfaceTintColor: Colors.white,
+        surfaceTintColor: Colors.transparent,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_rounded, color: Color(0xFF1A1A1A)),
+          icon: const Icon(
+            Icons.arrow_back_rounded,
+            color: BockColors.textPrimaryDark,
+          ),
           onPressed: () => Navigator.pop(context),
         ),
         title: Row(
@@ -417,46 +378,32 @@ class _AdminUploadScreenState extends State<AdminUploadScreen>
             Container(
               padding: const EdgeInsets.all(7),
               decoration: BoxDecoration(
-                color: _purple.withValues(alpha: 0.10),
+                color: BockColors.purple.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(9),
+                border: Border.all(
+                  color: BockColors.purple.withValues(alpha: 0.2),
+                ),
               ),
               child: Icon(
                 isEdit ? Icons.edit_rounded : Icons.cloud_upload_rounded,
-                color: _purple,
-                size: 18,
+                color: BockColors.purpleLight,
+                size: 16,
               ),
             ),
             const SizedBox(width: 10),
             Text(
-              isEdit ? "Edit App" : "Upload App",
+              isEdit ? 'Edit App' : 'Upload App',
               style: const TextStyle(
-                color: Color(0xFF1A1A1A),
+                color: BockColors.textPrimaryDark,
                 fontWeight: FontWeight.w700,
-                fontSize: 18,
-              ),
-            ),
-            const SizedBox(width: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-              decoration: BoxDecoration(
-                color: const Color(0xFFE8F5E9),
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: const Text(
-                "ADMIN",
-                style: TextStyle(
-                  color: _purple,
-                  fontSize: 10,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: 0.5,
-                ),
+                fontSize: 17,
               ),
             ),
           ],
         ),
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(1),
-          child: Divider(height: 1, color: Colors.grey.shade100),
+          child: Divider(height: 1, color: BockColors.borderDark),
         ),
       ),
       body: Center(
@@ -469,144 +416,145 @@ class _AdminUploadScreenState extends State<AdminUploadScreen>
               child: Container(
                 width: width > 900 ? 780 : double.infinity,
                 decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(24),
+                  color: BockColors.cardDark,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: BockColors.borderDark),
                   boxShadow: [
                     BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.35),
                       blurRadius: 30,
                       offset: const Offset(0, 10),
-                      color: _purple.withValues(alpha: 0.07),
-                    ),
-                    BoxShadow(
-                      blurRadius: 16,
-                      offset: const Offset(0, 4),
-                      color: Colors.black.withValues(alpha: 0.05),
                     ),
                   ],
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Header stripe
                     Container(
                       width: double.infinity,
                       padding: const EdgeInsets.symmetric(
-                        horizontal: 28,
-                        vertical: 22,
+                        horizontal: 24,
+                        vertical: 16,
                       ),
-                      decoration: const BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: [Color(0xFF6A1B9A), Color(0xFF4A148C)],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
+                      decoration: BoxDecoration(
+                        color: BockColors.purple.withValues(alpha: 0.12),
+                        borderRadius: const BorderRadius.only(
+                          topLeft: Radius.circular(20),
+                          topRight: Radius.circular(20),
                         ),
-                        borderRadius: BorderRadius.only(
-                          topLeft: Radius.circular(24),
-                          topRight: Radius.circular(24),
+                        border: Border(
+                          bottom: BorderSide(color: BockColors.borderDark),
                         ),
                       ),
                       child: Text(
                         isEdit
-                            ? "Update the app details below"
-                            : "Fill in the app details to publish",
-                        style: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.92),
+                            ? 'Update the app details below'
+                            : 'Fill in the app details to publish',
+                        style: const TextStyle(
+                          color: BockColors.textSecondaryDark,
                           fontSize: 13,
                         ),
                       ),
                     ),
-
                     Padding(
-                      padding: const EdgeInsets.all(28),
+                      padding: const EdgeInsets.all(24),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // ── App Info ──────────────────────────────
                           _sectionHeader(
                             Icons.info_outline_rounded,
-                            "App Info",
+                            'App Info',
                           ),
                           const SizedBox(height: 16),
-                          _buildLabel("App Name"),
+                          _label('App Name'),
                           const SizedBox(height: 8),
-                          _buildField(
-                            nameController,
-                            "Provide a name for the app",
-                          ),
-                          const SizedBox(height: 18),
-                          _buildLabel("Description"),
+                          _field(nameController, 'App name'),
+                          const SizedBox(height: 16),
+                          _label('Description'),
                           const SizedBox(height: 8),
-                          _buildField(
+                          _field(
                             descController,
-                            "Describe what the app does...",
+                            'Describe what the app does...',
                             maxLines: 3,
                           ),
-                          const SizedBox(height: 18),
+                          const SizedBox(height: 16),
                           Row(
                             children: [
                               Expanded(
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    _buildLabel("Version"),
+                                    _label('Version'),
                                     const SizedBox(height: 8),
-                                    _buildField(
-                                      versionController,
-                                      "e.g. 1.0.0",
-                                    ),
+                                    _field(versionController, 'e.g. 1.0.0'),
                                   ],
                                 ),
                               ),
-                              const SizedBox(width: 16),
+                              const SizedBox(width: 14),
                               Expanded(
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    _buildLabel("Size"),
+                                    _label('Size'),
                                     const SizedBox(height: 8),
-                                    _buildField(sizeController, "e.g. 24 MB"),
+                                    _field(sizeController, 'e.g. 24 MB'),
                                   ],
                                 ),
                               ),
                             ],
                           ),
-                          const SizedBox(height: 18),
-                          _buildLabel("Developer"),
+                          const SizedBox(height: 16),
+                          _label('Developer'),
                           const SizedBox(height: 8),
-                          _buildField(developerController, "e.g. Acme Corp"),
-
-                          // ── Developer Bio ─────────────────────────
-                          const SizedBox(height: 18),
-                          _buildLabel("Developer Bio"),
+                          _field(developerController, 'e.g. Acme Corp'),
+                          const SizedBox(height: 16),
+                          _label('Developer Bio'),
                           const SizedBox(height: 8),
-                          _buildField(
+                          _field(
                             developerBioController,
-                            "Short bio about the developer...",
-                            maxLines: 3,
+                            'Short bio...',
+                            maxLines: 2,
                           ),
-
-                          const SizedBox(height: 18),
-                          _buildLabel("Category"),
+                          const SizedBox(height: 16),
+                          _label('Category'),
                           const SizedBox(height: 8),
                           DropdownButtonFormField<String>(
-                            value: selectedCategory,
+                            initialValue: selectedCategory,
+                            dropdownColor: BockColors.cardDark,
+                            style: const TextStyle(
+                              fontSize: 14,
+                              color: BockColors.textPrimaryDark,
+                            ),
                             decoration: InputDecoration(
                               filled: true,
-                              fillColor: const Color(0xFFF5FAF6),
+                              fillColor: BockColors.surfaceDark,
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12),
                                 borderSide: BorderSide(
-                                  color: Colors.grey.shade200,
+                                  color: BockColors.borderDark,
+                                ),
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(12),
+                                borderSide: BorderSide(
+                                  color: BockColors.borderDark,
+                                ),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(12),
+                                borderSide: const BorderSide(
+                                  color: BockColors.purple,
+                                  width: 1.8,
                                 ),
                               ),
                             ),
                             items:
                                 [
-                                      "Productivity",
-                                      "Tools",
-                                      "Education",
-                                      "Utility",
-                                      "Social",
+                                      'Productivity',
+                                      'Tools',
+                                      'Education',
+                                      'Utility',
+                                      'Social',
                                     ]
                                     .map(
                                       (c) => DropdownMenuItem(
@@ -618,100 +566,95 @@ class _AdminUploadScreenState extends State<AdminUploadScreen>
                             onChanged: (v) =>
                                 setState(() => selectedCategory = v!),
                           ),
-                          const SizedBox(height: 18),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    _buildLabel("Rated For"),
-                                    const SizedBox(height: 8),
-                                    _buildField(
-                                      ratedForController,
-                                      "e.g. 3+, 12+",
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              const SizedBox(width: 16),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    _buildLabel("Package Name *"),
-                                    const SizedBox(height: 8),
-                                    _buildField(
-                                      packageController,
-                                      "Unique identifier",
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          ),
-
-                          const SizedBox(height: 32),
-                          Divider(color: Colors.grey.shade100),
-                          const SizedBox(height: 24),
-
-                          // ── Assets ────────────────────────────────
-                          _sectionHeader(Icons.perm_media_rounded, "Assets"),
                           const SizedBox(height: 16),
                           Row(
                             children: [
                               Expanded(
-                                child: _assetButton(
-                                  icon: Icons.image_rounded,
-                                  label: "Pick Icon",
-                                  onPressed: uploading ? null : pickIcon,
-                                  selected: iconFile != null,
-                                  selectedLabel: "Icon selected",
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    _label('Rated For'),
+                                    const SizedBox(height: 8),
+                                    _field(ratedForController, 'e.g. 3+'),
+                                  ],
                                 ),
                               ),
                               const SizedBox(width: 14),
                               Expanded(
-                                child: _assetButton(
-                                  icon: Icons.photo_library_rounded,
-                                  label: "Pick Screenshots",
-                                  onPressed: uploading ? null : pickScreenshots,
-                                  selected: screenshotFiles.isNotEmpty,
-                                  selectedLabel:
-                                      "${screenshotFiles.length} selected",
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    _label('Package Name *'),
+                                    const SizedBox(height: 8),
+                                    _field(
+                                      packageController,
+                                      'Unique identifier',
+                                    ),
+                                  ],
                                 ),
                               ),
                             ],
                           ),
 
-                          const SizedBox(height: 32),
-                          Divider(color: Colors.grey.shade100),
-                          const SizedBox(height: 24),
+                          const SizedBox(height: 28),
+                          Divider(color: BockColors.borderDark),
+                          const SizedBox(height: 20),
 
-                          // ── Downloadable Files ────────────────────
+                          _sectionHeader(Icons.perm_media_rounded, 'Assets'),
+                          const SizedBox(height: 16),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: _assetBtn(
+                                  icon: Icons.image_rounded,
+                                  label: 'Pick Icon',
+                                  onTap: uploading ? null : pickIcon,
+                                  selected: iconFile != null,
+                                  selectedLabel: 'Icon selected',
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: _assetBtn(
+                                  icon: Icons.photo_library_rounded,
+                                  label: 'Screenshots',
+                                  onTap: uploading ? null : pickScreenshots,
+                                  selected: screenshotFiles.isNotEmpty,
+                                  selectedLabel:
+                                      '${screenshotFiles.length} selected',
+                                ),
+                              ),
+                            ],
+                          ),
+
+                          const SizedBox(height: 28),
+                          Divider(color: BockColors.borderDark),
+                          const SizedBox(height: 20),
+
                           _sectionHeader(
                             Icons.folder_zip_outlined,
-                            "Downloadable Files",
+                            'Downloadable Files',
                           ),
                           const SizedBox(height: 16),
 
                           ..._fileEntries.asMap().entries.map(
-                            (e) => _buildFileEntryCard(e.key, e.value),
+                            (e) => _fileEntryCard(e.key, e.value),
                           ),
 
                           OutlinedButton.icon(
                             onPressed: uploading ? null : _addFileEntry,
-                            icon: const Icon(Icons.add_rounded, size: 18),
+                            icon: const Icon(Icons.add_rounded, size: 16),
                             label: const Text(
-                              "Add File",
+                              'Add File',
                               style: TextStyle(
                                 fontSize: 13,
                                 fontWeight: FontWeight.w600,
                               ),
                             ),
                             style: OutlinedButton.styleFrom(
-                              foregroundColor: _purple,
+                              foregroundColor: BockColors.purpleLight,
                               side: BorderSide(
-                                color: _purple.withValues(alpha: 0.4),
+                                color: BockColors.purple.withValues(alpha: 0.4),
                               ),
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(12),
@@ -723,22 +666,19 @@ class _AdminUploadScreenState extends State<AdminUploadScreen>
                             ),
                           ),
 
-                          const SizedBox(height: 32),
+                          const SizedBox(height: 28),
 
-                          // ── Submit ────────────────────────────────
                           SizedBox(
                             width: double.infinity,
                             height: 52,
                             child: ElevatedButton(
                               onPressed: uploading ? null : submit,
                               style: ElevatedButton.styleFrom(
-                                backgroundColor: _purple,
+                                backgroundColor: BockColors.purple,
                                 foregroundColor: Colors.white,
-                                disabledBackgroundColor: _purple.withValues(
-                                  alpha: 0.5,
-                                ),
+                                disabledBackgroundColor: BockColors.purple
+                                    .withValues(alpha: 0.4),
                                 elevation: 0,
-                                shadowColor: Colors.transparent,
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(14),
                                 ),
@@ -765,12 +705,11 @@ class _AdminUploadScreenState extends State<AdminUploadScreen>
                                         const SizedBox(width: 8),
                                         Text(
                                           isEdit
-                                              ? "Save Changes"
-                                              : "Publish App",
+                                              ? 'Save Changes'
+                                              : 'Publish App',
                                           style: const TextStyle(
                                             fontSize: 16,
                                             fontWeight: FontWeight.w700,
-                                            letterSpacing: 0.3,
                                           ),
                                         ),
                                       ],
@@ -790,21 +729,18 @@ class _AdminUploadScreenState extends State<AdminUploadScreen>
     );
   }
 
-  // ── File entry card ────────────────────────────────────────────────────────
-
-  Widget _buildFileEntryCard(int index, _FileEntry entry) {
+  Widget _fileEntryCard(int index, _FileEntry entry) {
     final hasFile = entry.platformFile != null;
-
     return Container(
-      margin: const EdgeInsets.only(bottom: 12),
+      margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: const Color(0xFFF5FAF6),
+        color: BockColors.surfaceDark,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(
           color: hasFile
-              ? _purple.withValues(alpha: 0.25)
-              : Colors.grey.shade200,
+              ? BockColors.purple.withValues(alpha: 0.3)
+              : BockColors.borderDark,
         ),
       ),
       child: Column(
@@ -820,25 +756,29 @@ class _AdminUploadScreenState extends State<AdminUploadScreen>
                         ? Icons.check_circle_rounded
                         : Icons.attach_file_rounded,
                     size: 16,
-                    color: hasFile ? _purple : Colors.grey.shade500,
+                    color: hasFile
+                        ? BockColors.purpleLight
+                        : BockColors.textSecondaryDark,
                   ),
                   label: Text(
-                    hasFile ? (entry.platformFile!.name) : "Choose file",
+                    hasFile ? entry.platformFile!.name : 'Choose file',
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w600,
-                      color: hasFile ? _purple : Colors.grey.shade600,
+                      color: hasFile
+                          ? BockColors.purpleLight
+                          : BockColors.textSecondaryDark,
                     ),
                   ),
                   style: OutlinedButton.styleFrom(
                     backgroundColor: hasFile
-                        ? _purple.withValues(alpha: 0.05)
-                        : Colors.white,
+                        ? BockColors.purple.withValues(alpha: 0.08)
+                        : Colors.transparent,
                     side: BorderSide(
                       color: hasFile
-                          ? _purple.withValues(alpha: 0.4)
-                          : Colors.grey.shade300,
+                          ? BockColors.purple.withValues(alpha: 0.4)
+                          : BockColors.borderDark,
                     ),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(10),
@@ -857,15 +797,18 @@ class _AdminUploadScreenState extends State<AdminUploadScreen>
                   vertical: 6,
                 ),
                 decoration: BoxDecoration(
-                  color: _purple.withValues(alpha: 0.08),
+                  color: BockColors.purple.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: BockColors.purple.withValues(alpha: 0.2),
+                  ),
                 ),
                 child: Text(
                   entry.type.toUpperCase(),
                   style: const TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.w700,
-                    color: _purple,
+                    color: BockColors.purpleLight,
                   ),
                 ),
               ),
@@ -875,13 +818,13 @@ class _AdminUploadScreenState extends State<AdminUploadScreen>
                 child: Container(
                   padding: const EdgeInsets.all(6),
                   decoration: BoxDecoration(
-                    color: Colors.red.shade50,
+                    color: BockColors.error.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Icon(
                     Icons.close_rounded,
                     size: 16,
-                    color: Colors.red.shade400,
+                    color: BockColors.error.withValues(alpha: 0.8),
                   ),
                 ),
               ),
@@ -890,12 +833,19 @@ class _AdminUploadScreenState extends State<AdminUploadScreen>
           const SizedBox(height: 10),
           TextField(
             controller: entry.labelCtrl,
-            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+            style: const TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w500,
+              color: BockColors.textPrimaryDark,
+            ),
             decoration: InputDecoration(
-              hintText: "Label  (e.g. Android APK, Windows Installer)",
-              hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 13),
+              hintText: 'Label (e.g. Android APK)',
+              hintStyle: TextStyle(
+                color: BockColors.textSecondaryDark.withValues(alpha: 0.5),
+                fontSize: 13,
+              ),
               filled: true,
-              fillColor: Colors.white,
+              fillColor: BockColors.cardDark,
               isDense: true,
               contentPadding: const EdgeInsets.symmetric(
                 horizontal: 12,
@@ -903,15 +853,18 @@ class _AdminUploadScreenState extends State<AdminUploadScreen>
               ),
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(10),
-                borderSide: BorderSide(color: Colors.grey.shade200),
+                borderSide: BorderSide(color: BockColors.borderDark),
               ),
               enabledBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(10),
-                borderSide: BorderSide(color: Colors.grey.shade200),
+                borderSide: BorderSide(color: BockColors.borderDark),
               ),
               focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(10),
-                borderSide: const BorderSide(color: _purple, width: 1.5),
+                borderSide: const BorderSide(
+                  color: BockColors.purple,
+                  width: 1.5,
+                ),
               ),
             ),
           ),
@@ -920,132 +873,121 @@ class _AdminUploadScreenState extends State<AdminUploadScreen>
     );
   }
 
-  // ── Shared UI helpers ──────────────────────────────────────────────────────
-
-  Widget _sectionHeader(IconData icon, String label) {
-    return Row(
-      children: [
-        Container(
-          padding: const EdgeInsets.all(7),
-          decoration: BoxDecoration(
-            color: const Color(0xFF6A1B9A).withValues(alpha: 0.10),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Icon(icon, color: const Color(0xFF6A1B9A), size: 16),
+  Widget _sectionHeader(IconData icon, String label) => Row(
+    children: [
+      Container(
+        padding: const EdgeInsets.all(7),
+        decoration: BoxDecoration(
+          color: BockColors.purple.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: BockColors.purple.withValues(alpha: 0.2)),
         ),
-        const SizedBox(width: 10),
-        Text(
-          label,
-          style: const TextStyle(
-            fontSize: 15,
-            fontWeight: FontWeight.w700,
-            color: Color(0xFF1A1A1A),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildLabel(String text) {
-    return Text(
-      text,
-      style: const TextStyle(
-        fontSize: 13,
-        fontWeight: FontWeight.w600,
-        color: Color(0xFF424242),
-        letterSpacing: 0.2,
+        child: Icon(icon, color: BockColors.purpleLight, size: 16),
       ),
-    );
-  }
-
-  Widget _buildField(
-    TextEditingController ctrl,
-    String hint, {
-    int maxLines = 1,
-  }) {
-    return TextField(
-      controller: ctrl,
-      maxLines: maxLines,
-      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
-      decoration: InputDecoration(
-        hintText: hint,
-        hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 14),
-        filled: true,
-        fillColor: const Color(0xFFF5FAF6),
-        contentPadding: const EdgeInsets.symmetric(
-          horizontal: 16,
-          vertical: 13,
-        ),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: Colors.grey.shade200),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: Colors.grey.shade200),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: Color(0xFF6A1B9A), width: 1.8),
+      const SizedBox(width: 10),
+      Text(
+        label,
+        style: const TextStyle(
+          fontSize: 15,
+          fontWeight: FontWeight.w700,
+          color: BockColors.textPrimaryDark,
         ),
       ),
-    );
-  }
+    ],
+  );
 
-  Widget _assetButton({
+  Widget _label(String text) => Text(
+    text,
+    style: const TextStyle(
+      fontSize: 12,
+      fontWeight: FontWeight.w600,
+      color: BockColors.textSecondaryDark,
+      letterSpacing: 0.3,
+    ),
+  );
+
+  Widget _field(TextEditingController ctrl, String hint, {int maxLines = 1}) =>
+      TextField(
+        controller: ctrl,
+        maxLines: maxLines,
+        style: const TextStyle(fontSize: 14, color: BockColors.textPrimaryDark),
+        decoration: InputDecoration(
+          hintText: hint,
+          hintStyle: TextStyle(
+            color: BockColors.textSecondaryDark.withValues(alpha: 0.5),
+            fontSize: 14,
+          ),
+          filled: true,
+          fillColor: BockColors.surfaceDark,
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 14,
+            vertical: 12,
+          ),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide(color: BockColors.borderDark),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide(color: BockColors.borderDark),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: BockColors.purple, width: 1.8),
+          ),
+        ),
+      );
+
+  Widget _assetBtn({
     required IconData icon,
     required String label,
-    required VoidCallback? onPressed,
+    required VoidCallback? onTap,
     required bool selected,
     required String selectedLabel,
-    bool fullWidth = false,
   }) {
-    return SizedBox(
-      width: fullWidth ? double.infinity : null,
-      child: OutlinedButton(
-        onPressed: onPressed,
-        style: OutlinedButton.styleFrom(
-          foregroundColor: selected
-              ? const Color(0xFF6A1B9A)
-              : const Color(0xFF424242),
-          backgroundColor: selected
-              ? const Color(0xFF6A1B9A).withValues(alpha: 0.05)
-              : const Color(0xFFF5FAF6),
-          side: BorderSide(
+    return OutlinedButton(
+      onPressed: onTap,
+      style: OutlinedButton.styleFrom(
+        foregroundColor: selected
+            ? BockColors.purpleLight
+            : BockColors.textSecondaryDark,
+        backgroundColor: selected
+            ? BockColors.purple.withValues(alpha: 0.08)
+            : Colors.transparent,
+        side: BorderSide(
+          color: selected
+              ? BockColors.purple.withValues(alpha: 0.4)
+              : BockColors.borderDark,
+          width: selected ? 1.5 : 1,
+        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            selected ? Icons.check_circle_rounded : icon,
+            size: 18,
             color: selected
-                ? const Color(0xFF6A1B9A).withValues(alpha: 0.5)
-                : Colors.grey.shade200,
-            width: selected ? 1.5 : 1,
+                ? BockColors.purpleLight
+                : BockColors.textSecondaryDark,
           ),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-          padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              selected ? Icons.check_circle_rounded : icon,
-              size: 18,
-              color: selected ? const Color(0xFF6A1B9A) : Colors.grey.shade500,
-            ),
-            const SizedBox(width: 8),
-            Flexible(
-              child: Text(
-                selected ? selectedLabel : label,
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: selected
-                      ? const Color(0xFF6A1B9A)
-                      : Colors.grey.shade600,
-                ),
-                overflow: TextOverflow.ellipsis,
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(
+              selected ? selectedLabel : label,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: selected
+                    ? BockColors.purpleLight
+                    : BockColors.textSecondaryDark,
               ),
+              overflow: TextOverflow.ellipsis,
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }

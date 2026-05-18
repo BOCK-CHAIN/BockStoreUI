@@ -19,6 +19,9 @@ class AuthProvider extends ChangeNotifier {
   bool get isLoggedIn => _token != null;
   bool get isAdmin => _user?.isAdmin ?? false;
 
+  // NEW: expose current user's id for ownership checks
+  int? get currentUserId => _user?.id;
+
   Future<void> restoreSession() async {
     try {
       final session = await _authService.restoreSession();
@@ -38,11 +41,9 @@ class AuthProvider extends ChangeNotifier {
 
   Future<bool> deleteAccount() async {
     final success = await _authService.deleteAccount();
-
     if (success) {
       await logout();
     }
-
     return success;
   }
 
@@ -51,7 +52,6 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
 
     final result = await _authService.login(email, password);
-
     _loading = false;
 
     if (result['success']) {
@@ -67,7 +67,6 @@ class AuthProvider extends ChangeNotifier {
 
   Future<void> updateProfileImage(XFile image) async {
     final newPath = await _authService.uploadProfileImage(image);
-
     if (newPath != null && _user != null) {
       _user = UserModel(
         id: _user!.id,
@@ -76,7 +75,6 @@ class AuthProvider extends ChangeNotifier {
         role: _user!.role,
         profileImage: newPath,
       );
-
       notifyListeners();
     }
   }
@@ -100,7 +98,6 @@ class AuthProvider extends ChangeNotifier {
       dob,
       gender,
     );
-
     _loading = false;
 
     if (result['success']) {

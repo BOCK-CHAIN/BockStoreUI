@@ -16,6 +16,7 @@ class AppModel {
   final int? installedVersionCode;
   final List<Map<String, dynamic>> files;
   final String? category;
+  final int? uploadedBy; // NEW: owner of this app
 
   AppModel({
     required this.id,
@@ -35,6 +36,7 @@ class AppModel {
     this.downloadCount = 0,
     this.files = const [],
     this.category,
+    this.uploadedBy,
   });
 
   factory AppModel.fromJson(Map<String, dynamic> json) {
@@ -62,6 +64,9 @@ class AppModel {
           .map((f) => Map<String, dynamic>.from(f as Map))
           .toList(),
       category: json['category'],
+      uploadedBy: json['uploaded_by'] != null
+          ? int.tryParse(json['uploaded_by'].toString())
+          : null,
     );
   }
 }

@@ -3,11 +3,11 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-
 import '../models/app_model.dart';
 import '../config/api_config.dart';
 import '../config/url_helper.dart';
 import 'app_detail_screen.dart';
+import '../theme/bock_colors.dart';
 
 class DeveloperScreen extends StatefulWidget {
   final String developerName;
@@ -24,59 +24,58 @@ class DeveloperScreen extends StatefulWidget {
 }
 
 class _DeveloperScreenState extends State<DeveloperScreen> {
-  static const _purple = Color(0xFF6A1B9A);
-
   String? developerBio;
+
+  Color get _bg => BockColors.bgDark;
+  Color get _card => BockColors.cardDark;
+  Color get _border => BockColors.borderDark;
+  Color get _textPrimary => BockColors.textPrimaryDark;
+  Color get _textSecondary => BockColors.textSecondaryDark;
 
   @override
   void initState() {
     super.initState();
-    fetchDeveloper();
+    _fetchDeveloper();
   }
 
-  Future<void> fetchDeveloper() async {
+  Future<void> _fetchDeveloper() async {
     try {
       final res = await http.get(
         Uri.parse(
           '${ApiConfig.baseUrl}/api/apps/developer?name=${Uri.encodeComponent(widget.developerName)}',
         ),
       );
-
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
-        setState(() {
-          developerBio = data['bio'];
-        });
+        setState(() => developerBio = data['bio']);
       }
-    } catch (e) {
-      print(e);
-    }
+    } catch (_) {}
   }
 
   @override
   Widget build(BuildContext context) {
     final devApps = widget.allApps
         .where(
-          (app) =>
-              (app.developer ?? '').toLowerCase() ==
+          (a) =>
+              (a.developer ?? '').toLowerCase() ==
               widget.developerName.toLowerCase(),
         )
         .toList();
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF0F4F0),
+      backgroundColor: _bg,
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor: BockColors.surfaceDark,
         elevation: 0,
-        surfaceTintColor: Colors.white,
+        surfaceTintColor: Colors.transparent,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_rounded, color: Color(0xFF1A1A1A)),
+          icon: Icon(Icons.arrow_back_rounded, color: _textPrimary),
           onPressed: () => Navigator.pop(context),
         ),
         title: Text(
           widget.developerName,
-          style: const TextStyle(
-            color: Color(0xFF1A1A1A),
+          style: TextStyle(
+            color: _textPrimary,
             fontWeight: FontWeight.w700,
             fontSize: 17,
           ),
@@ -84,7 +83,7 @@ class _DeveloperScreenState extends State<DeveloperScreen> {
         ),
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(1),
-          child: Divider(height: 1, color: Colors.grey.shade100),
+          child: Divider(height: 1, color: _border),
         ),
       ),
       body: Center(
@@ -93,72 +92,116 @@ class _DeveloperScreenState extends State<DeveloperScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // ── Developer info card ────────────────────────────────────
               Padding(
-                padding: const EdgeInsets.all(20),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      widget.developerName,
-                      style: const TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                child: Container(
+                  padding: const EdgeInsets.all(18),
+                  decoration: BoxDecoration(
+                    color: _card,
+                    borderRadius: BorderRadius.circular(18),
+                    border: Border.all(color: _border),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 52,
+                        height: 52,
+                        decoration: BoxDecoration(
+                          color: BockColors.purple.withValues(alpha: 0.12),
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: BockColors.purple.withValues(alpha: 0.25),
+                          ),
+                        ),
+                        child: Center(
+                          child: Text(
+                            widget.developerName[0].toUpperCase(),
+                            style: const TextStyle(
+                              fontSize: 22,
+                              fontWeight: FontWeight.w800,
+                              color: BockColors.purpleLight,
+                            ),
+                          ),
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      developerBio ?? "No description provided",
-                      style: const TextStyle(color: Colors.grey),
-                    ),
-                  ],
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              widget.developerName,
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w700,
+                                color: _textPrimary,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              developerBio ?? 'No bio provided',
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: _textSecondary,
+                                height: 1.5,
+                              ),
+                              maxLines: 3,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
 
+              const SizedBox(height: 16),
+
+              // ── Apps header ────────────────────────────────────────────
               Padding(
-                padding: const EdgeInsets.fromLTRB(20, 10, 20, 4),
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
                 child: Row(
                   children: [
                     Container(
-                      padding: const EdgeInsets.all(8),
+                      padding: const EdgeInsets.all(7),
                       decoration: BoxDecoration(
-                        color: _purple.withOpacity(0.10),
-                        borderRadius: BorderRadius.circular(10),
+                        color: BockColors.purple.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(9),
+                        border: Border.all(
+                          color: BockColors.purple.withValues(alpha: 0.2),
+                        ),
                       ),
                       child: const Icon(
-                        Icons.person_rounded,
-                        color: _purple,
-                        size: 18,
+                        Icons.apps_rounded,
+                        color: BockColors.purpleLight,
+                        size: 16,
                       ),
                     ),
                     const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            "Apps by this developer",
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w700,
-                              color: Color(0xFF1A1A1A),
-                            ),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Apps by this developer',
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700,
+                            color: _textPrimary,
                           ),
-                          Text(
-                            "${devApps.length} app${devApps.length == 1 ? '' : 's'}",
-                            style: const TextStyle(
-                              fontSize: 12,
-                              color: Color(0xFF9E9E9E),
-                            ),
-                          ),
-                        ],
-                      ),
+                        ),
+                        Text(
+                          '${devApps.length} app${devApps.length == 1 ? '' : 's'}',
+                          style: TextStyle(fontSize: 12, color: _textSecondary),
+                        ),
+                      ],
                     ),
                   ],
                 ),
               ),
 
-              const SizedBox(height: 12),
-
+              // ── App list ───────────────────────────────────────────────
               Expanded(
                 child: devApps.isEmpty
                     ? Center(
@@ -166,34 +209,40 @@ class _DeveloperScreenState extends State<DeveloperScreen> {
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             Container(
-                              padding: const EdgeInsets.all(22),
+                              padding: const EdgeInsets.all(20),
                               decoration: BoxDecoration(
-                                color: _purple.withOpacity(0.07),
+                                color: BockColors.purple.withValues(
+                                  alpha: 0.08,
+                                ),
                                 shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: BockColors.purple.withValues(
+                                    alpha: 0.15,
+                                  ),
+                                ),
                               ),
                               child: const Icon(
                                 Icons.apps_outlined,
-                                size: 44,
-                                color: _purple,
+                                size: 40,
+                                color: BockColors.purpleLight,
                               ),
                             ),
-                            const SizedBox(height: 18),
-                            const Text(
-                              "No apps found",
+                            const SizedBox(height: 16),
+                            Text(
+                              'No apps found',
                               style: TextStyle(
-                                fontSize: 16,
+                                fontSize: 15,
                                 fontWeight: FontWeight.w600,
-                                color: Color(0xFF424242),
+                                color: _textPrimary,
                               ),
                             ),
                             const SizedBox(height: 6),
                             Text(
-                              "This developer has no other apps in the store.",
+                              'This developer has no apps in the store.',
                               style: TextStyle(
                                 fontSize: 13,
-                                color: Colors.grey.shade500,
+                                color: _textSecondary,
                               ),
-                              textAlign: TextAlign.center,
                             ),
                           ],
                         ),
@@ -201,9 +250,9 @@ class _DeveloperScreenState extends State<DeveloperScreen> {
                     : ListView.builder(
                         padding: const EdgeInsets.fromLTRB(16, 0, 16, 20),
                         itemCount: devApps.length,
-                        itemBuilder: (context, index) {
-                          final app = devApps[index];
-                          return _DeveloperAppTile(
+                        itemBuilder: (_, i) {
+                          final app = devApps[i];
+                          return _DevAppTile(
                             app: app,
                             onTap: () => Navigator.push(
                               context,
@@ -226,28 +275,20 @@ class _DeveloperScreenState extends State<DeveloperScreen> {
   }
 }
 
-class _DeveloperAppTile extends StatelessWidget {
+class _DevAppTile extends StatelessWidget {
   final AppModel app;
   final VoidCallback onTap;
 
-  static const _purple = Color(0xFF6A1B9A);
-
-  const _DeveloperAppTile({required this.app, required this.onTap});
+  const _DevAppTile({required this.app, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: BockColors.cardDark,
         borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.04),
-            blurRadius: 10,
-            offset: const Offset(0, 3),
-          ),
-        ],
+        border: Border.all(color: BockColors.borderDark),
       ),
       child: Material(
         color: Colors.transparent,
@@ -263,22 +304,24 @@ class _DeveloperAppTile extends StatelessWidget {
                   borderRadius: BorderRadius.circular(12),
                   child: Image.network(
                     getFullUrl(app.iconUrl),
-                    width: 54,
-                    height: 54,
+                    width: 52,
+                    height: 52,
                     fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => Container(
-                      width: 54,
-                      height: 54,
+                    errorBuilder: (_, __, _) => Container(
+                      width: 52,
+                      height: 52,
                       decoration: BoxDecoration(
-                        color: const Color(0xFFF5FAF6),
+                        color: BockColors.purpleDim.withValues(alpha: 0.3),
                         borderRadius: BorderRadius.circular(12),
                       ),
-                      child: const Icon(Icons.apps_rounded, color: _purple),
+                      child: const Icon(
+                        Icons.apps_rounded,
+                        color: BockColors.purpleLight,
+                      ),
                     ),
                   ),
                 ),
                 const SizedBox(width: 12),
-
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -288,17 +331,17 @@ class _DeveloperAppTile extends StatelessWidget {
                         style: const TextStyle(
                           fontWeight: FontWeight.w700,
                           fontSize: 14,
-                          color: Color(0xFF1A1A1A),
+                          color: BockColors.textPrimaryDark,
                         ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        app.category ?? "Unknown",
+                        app.category ?? 'Unknown',
                         style: const TextStyle(
                           fontSize: 11,
-                          color: Color(0xFF9E9E9E),
+                          color: BockColors.textSecondaryDark,
                         ),
                       ),
                       const SizedBox(height: 4),
@@ -307,7 +350,7 @@ class _DeveloperAppTile extends StatelessWidget {
                           if (app.averageRating != null) ...[
                             const Icon(
                               Icons.star_rounded,
-                              color: Color(0xFFFFC107),
+                              color: BockColors.star,
                               size: 12,
                             ),
                             const SizedBox(width: 3),
@@ -315,17 +358,19 @@ class _DeveloperAppTile extends StatelessWidget {
                               app.averageRating!.toStringAsFixed(1),
                               style: const TextStyle(
                                 fontSize: 11,
-                                color: Color(0xFF757575),
+                                color: BockColors.textSecondaryDark,
                               ),
                             ),
                             const SizedBox(width: 8),
                           ],
                           Expanded(
                             child: Text(
-                              "${app.downloadCount} download${app.downloadCount == 1 ? '' : 's'}",
-                              style: const TextStyle(
+                              '${app.downloadCount} download${app.downloadCount == 1 ? '' : 's'}',
+                              style: TextStyle(
                                 fontSize: 11,
-                                color: Color(0xFFBDBDBD),
+                                color: BockColors.textSecondaryDark.withValues(
+                                  alpha: 0.7,
+                                ),
                               ),
                               overflow: TextOverflow.ellipsis,
                             ),
@@ -335,10 +380,9 @@ class _DeveloperAppTile extends StatelessWidget {
                     ],
                   ),
                 ),
-
-                const Icon(
+                Icon(
                   Icons.chevron_right_rounded,
-                  color: Color(0xFFBDBDBD),
+                  color: BockColors.textSecondaryDark.withValues(alpha: 0.4),
                   size: 20,
                 ),
               ],

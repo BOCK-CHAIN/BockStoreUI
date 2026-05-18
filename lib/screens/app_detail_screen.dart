@@ -20,11 +20,10 @@ import 'developer_screen.dart';
 import 'package:play_store_app/config/api_config.dart';
 import 'package:play_store_app/config/url_helper.dart';
 import 'package:play_store_app/widgets/manage_versions_sheet.dart';
+import '../theme/bock_colors.dart';
 
 class AppDetailScreen extends StatefulWidget {
   final AppModel app;
-
-  /// Pass the full app list so DeveloperScreen can filter without an API call.
   final List<AppModel> allApps;
 
   const AppDetailScreen({
@@ -39,7 +38,6 @@ class AppDetailScreen extends StatefulWidget {
 
 class _AppDetailScreenState extends State<AppDetailScreen> {
   late AppModel currentApp;
-
   final RatingService _ratingService = RatingService();
 
   List<String> screenshots = [];
@@ -51,15 +49,19 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
 
   RatingModel? userRating;
 
-  // Download state
   bool isDownloading = false;
   double downloadProgress = 0.0;
 
   int selectedRating = 0;
-  TextEditingController reviewController = TextEditingController();
+  final TextEditingController reviewController = TextEditingController();
   bool submittingRating = false;
 
-  static const _purple = Color(0xFF6A1B9A);
+  Color get _bg => BockColors.bgDark;
+  Color get _card => BockColors.cardDark;
+  Color get _border => BockColors.borderDark;
+  Color get _surface => BockColors.surfaceDark;
+  Color get _textPrimary => BockColors.textPrimaryDark;
+  Color get _textSecondary => BockColors.textSecondaryDark;
 
   @override
   void initState() {
@@ -75,20 +77,16 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
     super.dispose();
   }
 
-  // ── Share ──────────────────────────────────────────────────────────────────
   void _shareApp() {
-    final appName = currentApp.name;
-    final message =
-        'Check out this app: $appName on Bock Store\n'
-        'App ID: ${currentApp.id}';
-    Share.share(message, subject: appName);
+    Share.share(
+      'Check out ${currentApp.name} on Bock Store\nApp ID: ${currentApp.id}',
+      subject: currentApp.name,
+    );
   }
 
-  // ── Developer tap ──────────────────────────────────────────────────────────
   void _openDeveloperScreen() {
     final developer = currentApp.developer;
     if (developer == null || developer.trim().isEmpty) return;
-
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -98,27 +96,31 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
     );
   }
 
-  // ── Admin: delete ──────────────────────────────────────────────────────────
   Future<void> _confirmDelete() async {
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text(
-          "Delete App",
-          style: TextStyle(fontWeight: FontWeight.w700),
+      builder: (_) => AlertDialog(
+        backgroundColor: _card,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+          side: BorderSide(color: _border),
         ),
-        content: const Text(
-          "Are you sure you want to delete this app? This action cannot be undone.",
+        title: Text(
+          'Delete App',
+          style: TextStyle(fontWeight: FontWeight.w700, color: _textPrimary),
+        ),
+        content: Text(
+          'This cannot be undone.',
+          style: TextStyle(color: _textSecondary),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text("Cancel"),
+            child: Text('Cancel', style: TextStyle(color: _textSecondary)),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red.shade400,
+              backgroundColor: BockColors.error,
               foregroundColor: Colors.white,
               elevation: 0,
               shape: RoundedRectangleBorder(
@@ -126,7 +128,7 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
               ),
             ),
             onPressed: () => Navigator.pop(context, true),
-            child: const Text("Delete"),
+            child: const Text('Delete'),
           ),
         ],
       ),
@@ -136,43 +138,42 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
 
   Future<void> _deleteApp() async {
     final auth = context.read<AuthProvider>();
-    final response = await http.delete(
-      Uri.parse("${ApiConfig.baseUrl}/api/admin/apps/${currentApp.id}"),
-      headers: {"Authorization": "Bearer ${auth.token}"},
+    final res = await http.delete(
+      Uri.parse('${ApiConfig.baseUrl}/api/admin/apps/${currentApp.id}'),
+      headers: {'Authorization': 'Bearer ${auth.token}'},
     );
     if (!mounted) return;
-    if (response.statusCode == 200) {
+    if (res.statusCode == 200) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text("App deleted successfully"),
-          backgroundColor: _purple,
+          content: Text('App deleted'),
+          backgroundColor: BockColors.purple,
         ),
       );
       Navigator.pop(context, true);
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text("Failed to delete app"),
-          backgroundColor: Color(0xFFE53935),
+          content: Text('Failed to delete'),
+          backgroundColor: BockColors.error,
         ),
       );
     }
   }
 
-  // ── Uninstall ──────────────────────────────────────────────────────────────
   Future<void> uninstallApp() async {
     final auth = context.read<AuthProvider>();
-    final response = await http.delete(
-      Uri.parse("${ApiConfig.baseUrl}/api/apps/${currentApp.id}/uninstall"),
-      headers: {"Authorization": "Bearer ${auth.token}"},
+    final res = await http.delete(
+      Uri.parse('${ApiConfig.baseUrl}/api/apps/${currentApp.id}/uninstall'),
+      headers: {'Authorization': 'Bearer ${auth.token}'},
     );
-    if (response.statusCode == 200) {
+    if (res.statusCode == 200) {
       await fetchAppDetails();
     } else {
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text("Uninstall failed")));
+      ).showSnackBar(const SnackBar(content: Text('Uninstall failed')));
     }
   }
 
@@ -180,32 +181,42 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text("Uninstall App"),
-        content: const Text("Are you sure you want to uninstall?"),
+        backgroundColor: _card,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+          side: BorderSide(color: _border),
+        ),
+        title: Text(
+          'Uninstall App',
+          style: TextStyle(fontWeight: FontWeight.w700, color: _textPrimary),
+        ),
+        content: Text('Are you sure?', style: TextStyle(color: _textSecondary)),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text("Cancel"),
+            child: Text('Cancel', style: TextStyle(color: _textSecondary)),
           ),
           TextButton(
             onPressed: () async {
               Navigator.pop(context);
               await uninstallApp();
             },
-            child: const Text("Uninstall"),
+            child: const Text(
+              'Uninstall',
+              style: TextStyle(color: BockColors.error),
+            ),
           ),
         ],
       ),
     );
   }
 
-  // ── Fetch app details ──────────────────────────────────────────────────────
   Future<void> fetchAppDetails() async {
     try {
       final auth = context.read<AuthProvider>();
       final res = await http.get(
-        Uri.parse("${ApiConfig.baseUrl}/api/apps/${widget.app.id}"),
-        headers: {"Authorization": "Bearer ${auth.token}"},
+        Uri.parse('${ApiConfig.baseUrl}/api/apps/${widget.app.id}'),
+        headers: {'Authorization': 'Bearer ${auth.token}'},
       );
       if (res.statusCode == 200) {
         final data = json.decode(res.body);
@@ -213,12 +224,12 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
         setState(() {
           currentApp = AppModel.fromJson(data);
           ratingDistribution.clear();
-          if (data["rating_distribution"] != null) {
-            for (final item in data["rating_distribution"]) {
-              ratingDistribution[item["rating"]] = item["count"];
+          if (data['rating_distribution'] != null) {
+            for (final item in data['rating_distribution']) {
+              ratingDistribution[item['rating']] = item['count'];
             }
           }
-          screenshots = (data["screenshots"] as List)
+          screenshots = (data['screenshots'] as List)
               .map((e) => getFullUrl(e as String))
               .toList();
           loadingScreenshots = false;
@@ -233,58 +244,45 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
     }
   }
 
-  // ── Core download + install ────────────────────────────────────────────────
   Future<void> _downloadFile(Map<String, dynamic> file) async {
-    // Legacy storage permission for Android 9 and below only
-    // kIsWeb guard prevents Platform.isAndroid crash on web
     if (!kIsWeb && Platform.isAndroid) {
-      final androidInfo = await DeviceInfoPlugin().androidInfo;
-      if (androidInfo.version.sdkInt <= 28) {
+      final info = await DeviceInfoPlugin().androidInfo;
+      if (info.version.sdkInt <= 28) {
         final status = await Permission.storage.request();
         if (!status.isGranted) {
-          if (mounted) {
+          if (mounted)
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
-                content: Text("Storage permission required to download"),
-                backgroundColor: Colors.red,
+                content: Text('Storage permission required'),
+                backgroundColor: BockColors.error,
               ),
             );
-          }
           return;
         }
       }
     }
 
     final auth = context.read<AuthProvider>();
-
     setState(() {
       isDownloading = true;
       downloadProgress = 0.0;
     });
 
     try {
-      // Step 1: Get signed download URL from backend
-      final response = await http.get(
+      final res = await http.get(
         Uri.parse(
-          "${ApiConfig.baseUrl}/api/apps/${currentApp.id}/download?platform=android",
+          '${ApiConfig.baseUrl}/api/apps/${currentApp.id}/download?platform=android',
         ),
-        headers: {"Authorization": "Bearer ${auth.token}"},
+        headers: {'Authorization': 'Bearer ${auth.token}'},
       );
+      if (res.statusCode != 200)
+        throw DownloadException('Backend returned ${res.statusCode}');
 
-      if (response.statusCode != 200) {
-        throw DownloadException("Backend returned ${response.statusCode}");
-      }
+      final data = jsonDecode(res.body);
+      final String downloadUrl = data['download_url'] as String;
+      if (!downloadUrl.startsWith('https://'))
+        throw DownloadException('Server returned a non-HTTPS URL');
 
-      final data = jsonDecode(response.body);
-      final String downloadUrl = data["download_url"] as String;
-
-      if (!downloadUrl.startsWith('https://')) {
-        throw DownloadException(
-          "Server returned a non-HTTPS URL — refusing download.",
-        );
-      }
-
-      // ── WEB: open signed URL in new tab so browser downloads the APK ──
       if (kIsWeb) {
         final uri = Uri.parse(downloadUrl);
         if (await canLaunchUrl(uri)) {
@@ -292,34 +290,26 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
-                content: Text(
-                  "Download started in your browser. "
-                  "Install the APK manually on your Android device.",
-                ),
-                backgroundColor: _purple,
+                content: Text('Download started in your browser.'),
+                backgroundColor: BockColors.purple,
                 duration: Duration(seconds: 5),
               ),
             );
           }
         } else {
-          throw DownloadException("Could not open download URL in browser.");
+          throw DownloadException('Could not open download URL.');
         }
         await fetchAppDetails();
         return;
       }
 
-      // ── MOBILE: Dio download + system installer ────────────────────────
-      // Derive filename from URL, fall back to app name
       final rawSegment = Uri.parse(
         downloadUrl,
       ).pathSegments.last.split('?').first;
       final fileName = rawSegment.isNotEmpty
           ? rawSegment
-          : "${currentApp.name.replaceAll(' ', '_')}.apk";
+          : '${currentApp.name.replaceAll(' ', '_')}.apk';
 
-      print('[AppDetailScreen] Starting download: $fileName');
-
-      // Step 2: Download via Dio with progress
       final apkFile = await DownloadService.instance.downloadApk(
         downloadUrl,
         fileName: fileName,
@@ -331,28 +321,23 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text("Download complete — launching installer…"),
-          backgroundColor: _purple,
+          content: Text('Download complete — launching installer…'),
+          backgroundColor: BockColors.purple,
         ),
       );
-
-      // Step 3: Launch system installer
       await DownloadService.instance.installApk(apkFile);
-
       await fetchAppDetails();
     } on DownloadException catch (e) {
-      print('[AppDetailScreen] DownloadException: $e');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.message), backgroundColor: Colors.red),
+        SnackBar(content: Text(e.message), backgroundColor: BockColors.error),
       );
     } catch (e) {
-      print('[AppDetailScreen] Unexpected error: $e');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text("Download failed: $e"),
-          backgroundColor: Colors.red,
+          content: Text('Download failed: $e'),
+          backgroundColor: BockColors.error,
         ),
       );
     } finally {
@@ -360,12 +345,10 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
     }
   }
 
-  // ── Install / Update button handler ───────────────────────────────────────
   Future<void> _handleInstallTap() async {
     if (isDownloading) return;
     final files = currentApp.files;
     if (files.isEmpty) return;
-
     if (files.length == 1) {
       await _downloadFile(files.first);
     } else {
@@ -373,10 +356,10 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
     }
   }
 
-  // ── Bottom sheet: pick which file to download ──────────────────────────────
   void _showFilePicker() {
     showModalBottomSheet(
       context: context,
+      backgroundColor: _card,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -387,7 +370,6 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
         final oldFiles = currentApp.files
             .where((f) => f['is_old'] == true)
             .toList();
-
         return SafeArea(
           child: Padding(
             padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
@@ -397,21 +379,21 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
               children: [
                 Center(
                   child: Container(
-                    width: 40,
+                    width: 36,
                     height: 4,
                     decoration: BoxDecoration(
-                      color: Colors.grey.shade300,
+                      color: _border,
                       borderRadius: BorderRadius.circular(2),
                     ),
                   ),
                 ),
                 const SizedBox(height: 16),
-                const Text(
-                  "Choose download",
+                Text(
+                  'Choose download',
                   style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.w700,
-                    color: Color(0xFF1A1A1A),
+                    color: _textPrimary,
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -425,31 +407,34 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
                       width: 42,
                       height: 42,
                       decoration: BoxDecoration(
-                        color: _purple.withOpacity(0.08),
+                        color: BockColors.purple.withValues(alpha: 0.12),
                         borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: BockColors.purple.withValues(alpha: 0.2),
+                        ),
                       ),
                       child: Center(
                         child: Text(
                           type,
                           style: const TextStyle(
-                            fontSize: 11,
+                            fontSize: 10,
                             fontWeight: FontWeight.w700,
-                            color: _purple,
+                            color: BockColors.purpleLight,
                           ),
                         ),
                       ),
                     ),
                     title: Text(
                       label,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w600,
-                        color: Color(0xFF1A1A1A),
+                        color: _textPrimary,
                       ),
                     ),
                     trailing: const Icon(
                       Icons.download_rounded,
-                      color: _purple,
+                      color: BockColors.purpleLight,
                     ),
                     onTap: () async {
                       Navigator.pop(ctx);
@@ -458,15 +443,22 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
                   );
                 }),
                 if (oldFiles.isNotEmpty) ...[
-                  const Divider(),
+                  Divider(color: _border),
                   ListTile(
                     contentPadding: EdgeInsets.zero,
-                    leading: const Icon(Icons.history_rounded),
-                    title: const Text(
-                      "Manage Versions",
-                      style: TextStyle(fontWeight: FontWeight.w600),
+                    leading: Icon(Icons.history_rounded, color: _textSecondary),
+                    title: Text(
+                      'Manage Versions',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w600,
+                        color: _textPrimary,
+                      ),
                     ),
-                    trailing: const Icon(Icons.chevron_right_rounded, size: 18),
+                    trailing: Icon(
+                      Icons.chevron_right_rounded,
+                      size: 18,
+                      color: _textSecondary,
+                    ),
                     onTap: () {
                       Navigator.pop(ctx);
                       showModalBottomSheet(
@@ -491,7 +483,6 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
     );
   }
 
-  // ── Ratings ────────────────────────────────────────────────────────────────
   Future<void> fetchRatings() async {
     try {
       final result = await _ratingService.getRatings(currentApp.id);
@@ -508,7 +499,7 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
         userRating = existing;
         if (existing != null) {
           selectedRating = existing.rating;
-          reviewController.text = existing.reviewText ?? "";
+          reviewController.text = existing.reviewText ?? '';
         }
         loadingRatings = false;
       });
@@ -524,31 +515,31 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
     if (!auth.isLoggedIn) {
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text("Please login to rate.")));
+      ).showSnackBar(const SnackBar(content: Text('Please login to rate.')));
       return;
     }
     setState(() => submittingRating = true);
-    final response = await http.post(
-      Uri.parse("${ApiConfig.baseUrl}/api/apps/${currentApp.id}/rate"),
+    final res = await http.post(
+      Uri.parse('${ApiConfig.baseUrl}/api/apps/${currentApp.id}/rate'),
       headers: {
-        "Content-Type": "application/json",
-        "Authorization": "Bearer ${auth.token}",
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ${auth.token}',
       },
       body: jsonEncode({
-        "rating": selectedRating,
-        "review_text": reviewController.text.trim(),
+        'rating': selectedRating,
+        'review_text': reviewController.text.trim(),
       }),
     );
-    if (response.statusCode == 200 || response.statusCode == 201) {
+    if (res.statusCode == 200 || res.statusCode == 201) {
       await fetchAppDetails();
       await fetchRatings();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            userRating != null ? "Review updated." : "Review submitted.",
+            userRating != null ? 'Review updated.' : 'Review submitted.',
           ),
-          backgroundColor: _purple,
+          backgroundColor: BockColors.purple,
         ),
       );
     }
@@ -558,11 +549,11 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
 
   Future<void> deleteRating() async {
     final auth = context.read<AuthProvider>();
-    final response = await http.delete(
-      Uri.parse("${ApiConfig.baseUrl}/api/apps/${currentApp.id}/rate"),
-      headers: {"Authorization": "Bearer ${auth.token}"},
+    final res = await http.delete(
+      Uri.parse('${ApiConfig.baseUrl}/api/apps/${currentApp.id}/rate'),
+      headers: {'Authorization': 'Bearer ${auth.token}'},
     );
-    if (response.statusCode == 200) {
+    if (res.statusCode == 200) {
       await fetchAppDetails();
       await fetchRatings();
       if (!mounted) return;
@@ -573,14 +564,17 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
       });
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text("Review deleted.")));
+      ).showSnackBar(const SnackBar(content: Text('Review deleted.')));
     }
   }
 
-  // ── Build ──────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
+
+    // NEW: show edit/delete only to the user who uploaded this app
+    final bool isOwner =
+        auth.isLoggedIn && currentApp.uploadedBy == auth.currentUserId;
 
     final apkFile = currentApp.files
         .where((f) => f['type'] == 'apk' && f['is_old'] != true)
@@ -590,21 +584,13 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
         isInstalled &&
         currentApp.installedVersionCode != currentApp.versionCode;
     final bool hasFiles = currentApp.files.isNotEmpty;
-
-    String buttonText;
-    if (!isInstalled || apkFile == null) {
-      buttonText = "Install";
-    } else if (isUpdate) {
-      buttonText = "Update";
-    } else {
-      buttonText = "Uninstall";
-    }
-
-    final bool showInstallButton = hasFiles;
     final bool tapUninstalls = isInstalled && !isUpdate && apkFile != null;
 
-    // On web, never show "Uninstall" — just show "Download"
-    final bool webMode = kIsWeb;
+    String buttonText = !isInstalled || apkFile == null
+        ? 'Install'
+        : isUpdate
+        ? 'Update'
+        : 'Uninstall';
 
     return WillPopScope(
       onWillPop: () async {
@@ -612,36 +598,40 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
         return false;
       },
       child: Scaffold(
-        backgroundColor: const Color(0xFFF0F4F0),
+        backgroundColor: _bg,
         appBar: AppBar(
-          backgroundColor: Colors.white,
+          backgroundColor: _surface,
           elevation: 0,
-          surfaceTintColor: Colors.white,
+          surfaceTintColor: Colors.transparent,
           leading: IconButton(
-            icon: const Icon(
-              Icons.arrow_back_rounded,
-              color: Color(0xFF1A1A1A),
-            ),
+            icon: Icon(Icons.arrow_back_rounded, color: _textPrimary),
             onPressed: () => Navigator.pop(context, true),
           ),
           title: Text(
             currentApp.name,
-            style: const TextStyle(
-              color: Color(0xFF1A1A1A),
+            style: TextStyle(
+              color: _textPrimary,
               fontWeight: FontWeight.w700,
               fontSize: 17,
             ),
           ),
           actions: [
             IconButton(
-              icon: const Icon(Icons.share_rounded, color: _purple),
-              tooltip: "Share",
+              icon: const Icon(
+                Icons.share_rounded,
+                color: BockColors.purpleLight,
+              ),
+              tooltip: 'Share',
               onPressed: _shareApp,
             ),
-            if (auth.isAdmin) ...[
+            // Edit and Delete only appear for the app's uploader
+            if (isOwner) ...[
               IconButton(
-                icon: const Icon(Icons.edit_rounded, color: _purple),
-                tooltip: "Edit",
+                icon: const Icon(
+                  Icons.edit_rounded,
+                  color: BockColors.purpleLight,
+                ),
+                tooltip: 'Edit',
                 onPressed: () async {
                   final result = await Navigator.push(
                     context,
@@ -656,8 +646,11 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
                 },
               ),
               IconButton(
-                icon: Icon(Icons.delete_rounded, color: Colors.red.shade400),
-                tooltip: "Delete",
+                icon: Icon(
+                  Icons.delete_rounded,
+                  color: BockColors.error.withValues(alpha: 0.8),
+                ),
+                tooltip: 'Delete',
                 onPressed: _confirmDelete,
               ),
             ],
@@ -665,19 +658,18 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
           ],
           bottom: PreferredSize(
             preferredSize: const Size.fromHeight(1),
-            child: Divider(height: 1, color: Colors.grey.shade100),
+            child: Divider(height: 1, color: _border),
           ),
         ),
         body: Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 860),
             child: SingleChildScrollView(
-              padding: const EdgeInsets.all(20),
+              padding: const EdgeInsets.all(16),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // ── App header card ────────────────────────────────────
-                  _card(
+                  _cardWidget(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -685,25 +677,25 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             ClipRRect(
-                              borderRadius: BorderRadius.circular(20),
+                              borderRadius: BorderRadius.circular(18),
                               child: Image.network(
                                 getFullUrl(currentApp.iconUrl),
-                                width: 100,
-                                height: 100,
+                                width: 90,
+                                height: 90,
                                 fit: BoxFit.cover,
                               ),
                             ),
-                            const SizedBox(width: 18),
+                            const SizedBox(width: 16),
                             Expanded(
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(
                                     currentApp.name,
-                                    style: const TextStyle(
-                                      fontSize: 22,
+                                    style: TextStyle(
+                                      fontSize: 20,
                                       fontWeight: FontWeight.w800,
-                                      color: Color(0xFF1A1A1A),
+                                      color: _textPrimary,
                                     ),
                                   ),
                                   const SizedBox(height: 4),
@@ -715,35 +707,36 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
                                         Flexible(
                                           child: Text(
                                             currentApp.developer ??
-                                                "Unknown Developer",
+                                                'Unknown Developer',
                                             style: const TextStyle(
-                                              color: _purple,
+                                              color: BockColors.purpleLight,
                                               fontWeight: FontWeight.w600,
-                                              fontSize: 14,
+                                              fontSize: 13,
                                               decoration:
                                                   TextDecoration.underline,
-                                              decorationColor: _purple,
+                                              decorationColor:
+                                                  BockColors.purpleLight,
                                             ),
                                             overflow: TextOverflow.ellipsis,
                                           ),
                                         ),
-                                        const SizedBox(width: 4),
+                                        const SizedBox(width: 3),
                                         const Icon(
                                           Icons.chevron_right_rounded,
-                                          size: 16,
-                                          color: _purple,
+                                          size: 14,
+                                          color: BockColors.purpleLight,
                                         ),
                                       ],
                                     ),
                                   ),
                                   const SizedBox(height: 10),
                                   Wrap(
-                                    spacing: 8,
-                                    runSpacing: 6,
+                                    spacing: 6,
+                                    runSpacing: 5,
                                     children: [
                                       _chip(
                                         Icons.code_rounded,
-                                        "v${currentApp.version ?? 'N/A'}",
+                                        'v${currentApp.version ?? 'N/A'}',
                                       ),
                                       _chip(
                                         Icons.storage_rounded,
@@ -763,60 +756,56 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
                             ),
                           ],
                         ),
-                        const SizedBox(height: 20),
-
-                        // Stats row
+                        const SizedBox(height: 18),
                         Container(
                           padding: const EdgeInsets.symmetric(vertical: 14),
                           decoration: BoxDecoration(
-                            color: const Color(0xFFF5FAF6),
+                            color: BockColors.purple.withValues(alpha: 0.07),
                             borderRadius: BorderRadius.circular(14),
-                            border: Border.all(color: const Color(0xFFE0EEE5)),
+                            border: Border.all(
+                              color: BockColors.purple.withValues(alpha: 0.15),
+                            ),
                           ),
                           child: Row(
                             children: [
                               _statItem(
                                 currentApp.averageRating != null
-                                    ? "${currentApp.averageRating}★"
-                                    : "—",
-                                "${currentApp.totalReviews} reviews",
+                                    ? '${currentApp.averageRating}★'
+                                    : '—',
+                                '${currentApp.totalReviews} reviews',
                               ),
                               _statDivider(),
                               _statItem(
-                                "${currentApp.downloadCount}",
-                                "Downloads",
+                                '${currentApp.downloadCount}',
+                                'Downloads',
                               ),
                               _statDivider(),
                               _statItem(
-                                currentApp.ratedFor ?? "N/A",
-                                "Rated for",
+                                currentApp.ratedFor ?? 'N/A',
+                                'Rated for',
                               ),
                             ],
                           ),
                         ),
-
-                        const SizedBox(height: 20),
-
-                        // Install / Download / Uninstall button
-                        if (showInstallButton) ...[
-                          // Progress bar — mobile only
-                          if (!webMode && isDownloading) ...[
+                        const SizedBox(height: 18),
+                        if (hasFiles) ...[
+                          if (!kIsWeb && isDownloading) ...[
                             ClipRRect(
-                              borderRadius: BorderRadius.circular(8),
+                              borderRadius: BorderRadius.circular(6),
                               child: LinearProgressIndicator(
                                 value: downloadProgress,
-                                minHeight: 6,
-                                backgroundColor: Colors.grey.shade200,
-                                color: _purple,
+                                minHeight: 5,
+                                backgroundColor: _border,
+                                color: BockColors.purple,
                               ),
                             ),
                             const SizedBox(height: 6),
                             Center(
                               child: Text(
-                                "Downloading… ${(downloadProgress * 100).toStringAsFixed(0)}%",
-                                style: const TextStyle(
+                                'Downloading… ${(downloadProgress * 100).toStringAsFixed(0)}%',
+                                style: TextStyle(
                                   fontSize: 12,
-                                  color: Color(0xFF757575),
+                                  color: _textSecondary,
                                 ),
                               ),
                             ),
@@ -824,11 +813,11 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
                           ],
                           SizedBox(
                             width: double.infinity,
-                            height: 50,
+                            height: 48,
                             child: ElevatedButton.icon(
                               onPressed: isDownloading
                                   ? null
-                                  : (!webMode && tapUninstalls)
+                                  : (!kIsWeb && tapUninstalls)
                                   ? confirmUninstall
                                   : _handleInstallTap,
                               icon: isDownloading
@@ -841,23 +830,20 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
                                       ),
                                     )
                                   : Icon(
-                                      webMode
+                                      kIsWeb
                                           ? Icons.download_rounded
-                                          : (currentApp.files.length > 1 &&
-                                                    !tapUninstalls
-                                                ? Icons.expand_more_rounded
-                                                : Icons.android),
-                                      size: 20,
+                                          : Icons.android,
+                                      size: 18,
                                     ),
                               label: Text(
                                 isDownloading
-                                    ? "Downloading…"
-                                    : webMode
-                                    ? "Download APK"
+                                    ? 'Downloading…'
+                                    : kIsWeb
+                                    ? 'Download'
                                     : tapUninstalls
-                                    ? "Uninstall"
+                                    ? 'Uninstall'
                                     : currentApp.files.length > 1
-                                    ? "Download"
+                                    ? 'Download'
                                     : buttonText,
                                 style: const TextStyle(
                                   fontSize: 15,
@@ -865,47 +851,45 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
                                 ),
                               ),
                               style: ElevatedButton.styleFrom(
-                                backgroundColor: _purple,
+                                backgroundColor: BockColors.purple,
                                 foregroundColor: Colors.white,
                                 elevation: 0,
                                 shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(14),
+                                  borderRadius: BorderRadius.circular(13),
                                 ),
                               ),
                             ),
                           ),
-                          const SizedBox(height: 8),
                         ],
                       ],
                     ),
                   ),
-
-                  const SizedBox(height: 16),
-
-                  // ── Screenshots ────────────────────────────────────────
-                  _card(
+                  const SizedBox(height: 12),
+                  _cardWidget(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        _sectionTitle("Screenshots"),
-                        const SizedBox(height: 16),
+                        _sectionTitle('Screenshots'),
+                        const SizedBox(height: 14),
                         if (loadingScreenshots)
                           const Center(
-                            child: CircularProgressIndicator(color: _purple),
+                            child: CircularProgressIndicator(
+                              color: BockColors.purple,
+                            ),
                           )
                         else if (screenshots.isNotEmpty)
                           SizedBox(
-                            height: 240,
+                            height: 220,
                             child: ListView.builder(
                               scrollDirection: Axis.horizontal,
                               itemCount: screenshots.length,
-                              itemBuilder: (context, index) => Padding(
-                                padding: const EdgeInsets.only(right: 14),
+                              itemBuilder: (_, i) => Padding(
+                                padding: const EdgeInsets.only(right: 12),
                                 child: ClipRRect(
-                                  borderRadius: BorderRadius.circular(14),
+                                  borderRadius: BorderRadius.circular(12),
                                   child: Image.network(
-                                    screenshots[index],
-                                    width: 130,
+                                    screenshots[i],
+                                    width: 120,
                                     fit: BoxFit.cover,
                                   ),
                                 ),
@@ -914,60 +898,54 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
                           )
                         else
                           Text(
-                            "No screenshots available",
+                            'No screenshots available',
                             style: TextStyle(
-                              color: Colors.grey.shade400,
+                              color: _textSecondary,
                               fontSize: 13,
                             ),
                           ),
                       ],
                     ),
                   ),
-
-                  const SizedBox(height: 16),
-
-                  // ── About ──────────────────────────────────────────────
-                  _card(
+                  const SizedBox(height: 12),
+                  _cardWidget(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        _sectionTitle("About this app"),
-                        const SizedBox(height: 12),
+                        _sectionTitle('About this app'),
+                        const SizedBox(height: 10),
                         Text(
                           currentApp.description,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 14,
-                            color: Color(0xFF424242),
-                            height: 1.6,
+                            color: _textSecondary,
+                            height: 1.65,
                           ),
                         ),
                       ],
                     ),
                   ),
-
-                  const SizedBox(height: 16),
-
-                  // ── Rate ───────────────────────────────────────────────
-                  _card(
+                  const SizedBox(height: 12),
+                  _cardWidget(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        _sectionTitle("Rate this app"),
+                        _sectionTitle('Rate this app'),
                         const SizedBox(height: 14),
                         Row(
-                          children: List.generate(5, (index) {
-                            final starIndex = index + 1;
+                          children: List.generate(5, (i) {
+                            final star = i + 1;
                             return GestureDetector(
                               onTap: () =>
-                                  setState(() => selectedRating = starIndex),
+                                  setState(() => selectedRating = star),
                               child: Padding(
                                 padding: const EdgeInsets.only(right: 4),
                                 child: Icon(
-                                  starIndex <= selectedRating
+                                  star <= selectedRating
                                       ? Icons.star_rounded
                                       : Icons.star_outline_rounded,
-                                  color: const Color(0xFFFFC107),
-                                  size: 36,
+                                  color: BockColors.star,
+                                  size: 34,
                                 ),
                               ),
                             );
@@ -977,49 +955,45 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
                         TextField(
                           controller: reviewController,
                           maxLines: 3,
-                          style: const TextStyle(fontSize: 14),
+                          style: TextStyle(fontSize: 14, color: _textPrimary),
                           decoration: InputDecoration(
-                            hintText: "Write a review (optional)",
+                            hintText: 'Write a review (optional)',
                             hintStyle: TextStyle(
-                              color: Colors.grey.shade400,
+                              color: _textSecondary.withValues(alpha: 0.5),
                               fontSize: 14,
                             ),
                             filled: true,
-                            fillColor: const Color(0xFFF5FAF6),
+                            fillColor: _surface,
                             contentPadding: const EdgeInsets.all(14),
                             border: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(12),
-                              borderSide: BorderSide(
-                                color: Colors.grey.shade200,
-                              ),
+                              borderSide: BorderSide(color: _border),
                             ),
                             enabledBorder: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(12),
-                              borderSide: BorderSide(
-                                color: Colors.grey.shade200,
-                              ),
+                              borderSide: BorderSide(color: _border),
                             ),
                             focusedBorder: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(12),
                               borderSide: const BorderSide(
-                                color: _purple,
+                                color: BockColors.purple,
                                 width: 1.8,
                               ),
                             ),
                           ),
                         ),
-                        const SizedBox(height: 14),
+                        const SizedBox(height: 12),
                         Row(
                           children: [
                             Expanded(
                               child: SizedBox(
-                                height: 46,
+                                height: 44,
                                 child: ElevatedButton(
                                   onPressed: submittingRating
                                       ? null
                                       : submitRating,
                                   style: ElevatedButton.styleFrom(
-                                    backgroundColor: _purple,
+                                    backgroundColor: BockColors.purple,
                                     foregroundColor: Colors.white,
                                     elevation: 0,
                                     shape: RoundedRectangleBorder(
@@ -1037,8 +1011,8 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
                                         )
                                       : Text(
                                           userRating != null
-                                              ? "Update Review"
-                                              : "Submit Review",
+                                              ? 'Update Review'
+                                              : 'Submit Review',
                                           style: const TextStyle(
                                             fontWeight: FontWeight.w700,
                                           ),
@@ -1047,22 +1021,24 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
                               ),
                             ),
                             if (userRating != null) ...[
-                              const SizedBox(width: 12),
+                              const SizedBox(width: 10),
                               SizedBox(
-                                height: 46,
+                                height: 44,
                                 child: OutlinedButton(
                                   onPressed: deleteRating,
                                   style: OutlinedButton.styleFrom(
-                                    foregroundColor: Colors.red.shade400,
+                                    foregroundColor: BockColors.error,
                                     side: BorderSide(
-                                      color: Colors.red.shade200,
+                                      color: BockColors.error.withValues(
+                                        alpha: 0.4,
+                                      ),
                                     ),
                                     shape: RoundedRectangleBorder(
                                       borderRadius: BorderRadius.circular(12),
                                     ),
                                   ),
                                   child: const Text(
-                                    "Delete",
+                                    'Delete',
                                     style: TextStyle(
                                       fontWeight: FontWeight.w600,
                                     ),
@@ -1075,16 +1051,13 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
                       ],
                     ),
                   ),
-
-                  const SizedBox(height: 16),
-
-                  // ── Reviews ────────────────────────────────────────────
-                  _card(
+                  const SizedBox(height: 12),
+                  _cardWidget(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        _sectionTitle("Reviews"),
-                        const SizedBox(height: 16),
+                        _sectionTitle('Reviews'),
+                        const SizedBox(height: 14),
                         ...List.generate(5, (i) {
                           final star = 5 - i;
                           final total = currentApp.totalReviews == 0
@@ -1096,20 +1069,20 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
                             child: Row(
                               children: [
                                 SizedBox(
-                                  width: 28,
+                                  width: 24,
                                   child: Text(
-                                    "$star",
-                                    style: const TextStyle(
+                                    '$star',
+                                    style: TextStyle(
                                       fontSize: 12,
                                       fontWeight: FontWeight.w600,
-                                      color: Color(0xFF757575),
+                                      color: _textSecondary,
                                     ),
                                   ),
                                 ),
                                 const Icon(
                                   Icons.star_rounded,
-                                  size: 13,
-                                  color: Color(0xFFFFC107),
+                                  size: 12,
+                                  color: BockColors.star,
                                 ),
                                 const SizedBox(width: 8),
                                 Expanded(
@@ -1117,20 +1090,20 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
                                     borderRadius: BorderRadius.circular(4),
                                     child: LinearProgressIndicator(
                                       value: count / total,
-                                      backgroundColor: Colors.grey.shade100,
-                                      color: _purple,
-                                      minHeight: 6,
+                                      backgroundColor: _border,
+                                      color: BockColors.purple,
+                                      minHeight: 5,
                                     ),
                                   ),
                                 ),
                                 const SizedBox(width: 8),
                                 SizedBox(
-                                  width: 24,
+                                  width: 22,
                                   child: Text(
-                                    "$count",
-                                    style: const TextStyle(
+                                    '$count',
+                                    style: TextStyle(
                                       fontSize: 12,
-                                      color: Color(0xFF757575),
+                                      color: _textSecondary,
                                     ),
                                   ),
                                 ),
@@ -1138,34 +1111,34 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
                             ),
                           );
                         }),
-                        const SizedBox(height: 24),
-                        Divider(color: Colors.grey.shade100),
-                        const SizedBox(height: 16),
+                        const SizedBox(height: 20),
+                        Divider(color: _border),
+                        const SizedBox(height: 14),
                         if (loadingRatings)
                           const Center(
-                            child: CircularProgressIndicator(color: _purple),
+                            child: CircularProgressIndicator(
+                              color: BockColors.purple,
+                            ),
                           )
                         else if (ratings.isEmpty)
                           Text(
-                            "No reviews yet",
+                            'No reviews yet',
                             style: TextStyle(
-                              color: Colors.grey.shade400,
+                              color: _textSecondary,
                               fontSize: 13,
                             ),
                           )
                         else
                           ...ratings.map((rating) {
-                            final formattedDate =
-                                "${rating.createdAt.day}/${rating.createdAt.month}/${rating.createdAt.year}";
+                            final date =
+                                '${rating.createdAt.day}/${rating.createdAt.month}/${rating.createdAt.year}';
                             return Container(
-                              margin: const EdgeInsets.only(bottom: 14),
+                              margin: const EdgeInsets.only(bottom: 12),
                               padding: const EdgeInsets.all(14),
                               decoration: BoxDecoration(
-                                color: const Color(0xFFF9FBF9),
+                                color: _surface,
                                 borderRadius: BorderRadius.circular(14),
-                                border: Border.all(
-                                  color: const Color(0xFFE8F5E9),
-                                ),
+                                border: Border.all(color: _border),
                               ),
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1173,10 +1146,9 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
                                   Row(
                                     children: [
                                       CircleAvatar(
-                                        radius: 18,
-                                        backgroundColor: _purple.withOpacity(
-                                          0.15,
-                                        ),
+                                        radius: 17,
+                                        backgroundColor: BockColors.purple
+                                            .withValues(alpha: 0.2),
                                         backgroundImage:
                                             rating.profileImage != null
                                             ? NetworkImage(
@@ -1188,9 +1160,9 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
                                                 rating.userName[0]
                                                     .toUpperCase(),
                                                 style: const TextStyle(
-                                                  color: _purple,
+                                                  color: BockColors.purpleLight,
                                                   fontWeight: FontWeight.bold,
-                                                  fontSize: 13,
+                                                  fontSize: 12,
                                                 ),
                                               )
                                             : null,
@@ -1203,17 +1175,18 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
                                           children: [
                                             Text(
                                               rating.userName,
-                                              style: const TextStyle(
+                                              style: TextStyle(
                                                 fontWeight: FontWeight.w700,
-                                                fontSize: 14,
-                                                color: Color(0xFF1A1A1A),
+                                                fontSize: 13,
+                                                color: _textPrimary,
                                               ),
                                             ),
                                             Text(
-                                              formattedDate,
-                                              style: const TextStyle(
+                                              date,
+                                              style: TextStyle(
                                                 fontSize: 11,
-                                                color: Color(0xFFBDBDBD),
+                                                color: _textSecondary
+                                                    .withValues(alpha: 0.7),
                                               ),
                                             ),
                                           ],
@@ -1226,8 +1199,8 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
                                             i < rating.rating
                                                 ? Icons.star_rounded
                                                 : Icons.star_outline_rounded,
-                                            color: const Color(0xFFFFC107),
-                                            size: 14,
+                                            color: BockColors.star,
+                                            size: 13,
                                           ),
                                         ),
                                       ),
@@ -1238,9 +1211,9 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
                                     const SizedBox(height: 10),
                                     Text(
                                       rating.reviewText!,
-                                      style: const TextStyle(
+                                      style: TextStyle(
                                         fontSize: 13,
-                                        color: Color(0xFF424242),
+                                        color: _textSecondary,
                                         height: 1.5,
                                       ),
                                     ),
@@ -1252,13 +1225,10 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
                       ],
                     ),
                   ),
-
-                  const SizedBox(height: 16),
-
-                  // ── More by developer ──────────────────────────────────
-                  _buildHorizontalAppSection(
+                  const SizedBox(height: 12),
+                  _buildHorizontalSection(
                     title:
-                        "More apps by ${currentApp.developer ?? 'this developer'}",
+                        'More by ${currentApp.developer ?? 'this developer'}',
                     apps: widget.allApps
                         .where(
                           (a) =>
@@ -1267,14 +1237,11 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
                                   (currentApp.developer ?? ''),
                         )
                         .toList(),
-                    emptyMessage: "No other apps by this developer",
+                    emptyMsg: 'No other apps by this developer',
                   ),
-
-                  const SizedBox(height: 16),
-
-                  // ── Similar apps ───────────────────────────────────────
-                  _buildHorizontalAppSection(
-                    title: "Similar apps",
+                  const SizedBox(height: 12),
+                  _buildHorizontalSection(
+                    title: 'Similar apps',
                     apps: widget.allApps
                         .where(
                           (a) =>
@@ -1284,9 +1251,8 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
                               (a.category ?? '').isNotEmpty,
                         )
                         .toList(),
-                    emptyMessage: "No similar apps found",
+                    emptyMsg: 'No similar apps found',
                   ),
-
                   const SizedBox(height: 24),
                 ],
               ),
@@ -1297,38 +1263,102 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
     );
   }
 
-  // ── Helpers ────────────────────────────────────────────────────────────────
-  Widget _buildHorizontalAppSection({
+  Widget _buildHorizontalSection({
     required String title,
     required List<AppModel> apps,
-    required String emptyMessage,
+    required String emptyMsg,
   }) {
-    return _card(
+    return _cardWidget(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _sectionTitle(title),
-          const SizedBox(height: 16),
+          const SizedBox(height: 14),
           if (apps.isEmpty)
             Text(
-              emptyMessage,
-              style: TextStyle(color: Colors.grey.shade400, fontSize: 13),
+              emptyMsg,
+              style: TextStyle(color: _textSecondary, fontSize: 13),
             )
           else
             SizedBox(
-              height: 130,
+              height: 120,
               child: ListView.builder(
                 scrollDirection: Axis.horizontal,
                 itemCount: apps.length,
-                itemBuilder: (context, index) {
-                  final app = apps[index];
-                  return _HorizontalAppItem(
-                    app: app,
+                itemBuilder: (_, i) {
+                  final app = apps[i];
+                  return GestureDetector(
                     onTap: () => Navigator.push(
                       context,
                       MaterialPageRoute(
                         builder: (_) =>
                             AppDetailScreen(app: app, allApps: widget.allApps),
+                      ),
+                    ),
+                    child: Container(
+                      width: 80,
+                      margin: const EdgeInsets.only(right: 12),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(14),
+                            child: Image.network(
+                              getFullUrl(app.iconUrl),
+                              width: 64,
+                              height: 64,
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, __, ___) => Container(
+                                width: 64,
+                                height: 64,
+                                decoration: BoxDecoration(
+                                  color: BockColors.purpleDim.withValues(
+                                    alpha: 0.3,
+                                  ),
+                                  borderRadius: BorderRadius.circular(14),
+                                ),
+                                child: const Icon(
+                                  Icons.apps_rounded,
+                                  color: BockColors.purpleLight,
+                                  size: 24,
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 7),
+                          Text(
+                            app.name,
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: _textPrimary,
+                            ),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            textAlign: TextAlign.center,
+                          ),
+                          if (app.averageRating != null) ...[
+                            const SizedBox(height: 2),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                const Icon(
+                                  Icons.star_rounded,
+                                  color: BockColors.star,
+                                  size: 10,
+                                ),
+                                const SizedBox(width: 2),
+                                Text(
+                                  app.averageRating!.toStringAsFixed(1),
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    color: _textSecondary,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ],
                       ),
                     ),
                   );
@@ -1340,49 +1370,43 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
     );
   }
 
-  Widget _card({required Widget child}) => Container(
+  Widget _cardWidget({required Widget child}) => Container(
     width: double.infinity,
-    padding: const EdgeInsets.all(20),
+    padding: const EdgeInsets.all(18),
     decoration: BoxDecoration(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(20),
-      boxShadow: [
-        BoxShadow(
-          blurRadius: 14,
-          offset: const Offset(0, 4),
-          color: Colors.black.withOpacity(0.04),
-        ),
-      ],
+      color: _card,
+      borderRadius: BorderRadius.circular(18),
+      border: Border.all(color: _border),
     ),
     child: child,
   );
 
   Widget _sectionTitle(String text) => Text(
     text,
-    style: const TextStyle(
-      fontSize: 16,
+    style: TextStyle(
+      fontSize: 15,
       fontWeight: FontWeight.w700,
-      color: Color(0xFF1A1A1A),
+      color: _textPrimary,
     ),
   );
 
   Widget _chip(IconData icon, String label) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+    padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
     decoration: BoxDecoration(
-      color: const Color(0xFFF5FAF6),
+      color: BockColors.purple.withValues(alpha: 0.10),
       borderRadius: BorderRadius.circular(8),
-      border: Border.all(color: const Color(0xFFE0EEE5)),
+      border: Border.all(color: BockColors.purple.withValues(alpha: 0.2)),
     ),
     child: Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(icon, size: 12, color: const Color(0xFF6A1B9A)),
-        const SizedBox(width: 5),
+        Icon(icon, size: 11, color: BockColors.purpleLight),
+        const SizedBox(width: 4),
         Text(
           label,
-          style: const TextStyle(
-            fontSize: 12,
-            color: Color(0xFF424242),
+          style: TextStyle(
+            fontSize: 11,
+            color: _textSecondary,
             fontWeight: FontWeight.w500,
           ),
         ),
@@ -1395,103 +1419,18 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
       children: [
         Text(
           value,
-          style: const TextStyle(
-            fontSize: 17,
+          style: TextStyle(
+            fontSize: 16,
             fontWeight: FontWeight.w800,
-            color: Color(0xFF1A1A1A),
+            color: _textPrimary,
           ),
         ),
         const SizedBox(height: 3),
-        Text(
-          label,
-          style: const TextStyle(fontSize: 11, color: Color(0xFF9E9E9E)),
-        ),
+        Text(label, style: TextStyle(fontSize: 11, color: _textSecondary)),
       ],
     ),
   );
 
   Widget _statDivider() =>
-      Container(width: 1, height: 36, color: const Color(0xFFE0EEE5));
-}
-
-// ── Horizontal app item card ───────────────────────────────────────────────
-class _HorizontalAppItem extends StatelessWidget {
-  final AppModel app;
-  final VoidCallback onTap;
-  static const _purple = Color(0xFF6A1B9A);
-
-  const _HorizontalAppItem({required this.app, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: 90,
-        margin: const EdgeInsets.only(right: 14),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(16),
-              child: Image.network(
-                getFullUrl(app.iconUrl),
-                width: 72,
-                height: 72,
-                fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => Container(
-                  width: 72,
-                  height: 72,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFF5FAF6),
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: const Icon(
-                    Icons.apps_rounded,
-                    color: _purple,
-                    size: 28,
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              app.name,
-              style: const TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                color: Color(0xFF1A1A1A),
-              ),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.center,
-            ),
-            if (app.averageRating != null) ...[
-              const SizedBox(height: 3),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(
-                    Icons.star_rounded,
-                    color: Color(0xFFFFC107),
-                    size: 11,
-                  ),
-                  const SizedBox(width: 2),
-                  Text(
-                    app.averageRating!.toStringAsFixed(1),
-                    style: const TextStyle(
-                      fontSize: 11,
-                      color: Color(0xFF9E9E9E),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
+      Container(width: 1, height: 32, color: BockColors.borderDark);
 }
