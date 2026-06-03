@@ -1,5 +1,5 @@
-name: play_store_app
-description: "A new Flutter project."
+name: bockstore
+description: "Bock Store - App Marketplace."
 publish_to: "none"
 
 version: 1.0.0+1

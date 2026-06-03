@@ -17,9 +17,9 @@ import '../services/download_service.dart';
 import '../providers/auth_provider.dart';
 import 'admin_upload_screen.dart';
 import 'developer_screen.dart';
-import 'package:play_store_app/config/api_config.dart';
-import 'package:play_store_app/config/url_helper.dart';
-import 'package:play_store_app/widgets/manage_versions_sheet.dart';
+import 'package:bockstore/config/api_config.dart';
+import 'package:bockstore/config/url_helper.dart';
+import 'package:bockstore/widgets/manage_versions_sheet.dart';
 import '../theme/bock_colors.dart';
 
 class AppDetailScreen extends StatefulWidget {
@@ -269,22 +269,23 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
     });
 
     try {
-      final res = await http.get(
+      // FIX: use the file's own URL directly — don't hit the download endpoint
+      // with a hardcoded platform, which always returned the APK
+      final String fileUrl = file['url'] as String;
+      if (!fileUrl.startsWith('https://')) {
+        throw DownloadException('Invalid file URL');
+      }
+
+      // Still call the download endpoint to track the download count
+      http.get(
         Uri.parse(
-          '${ApiConfig.baseUrl}/api/apps/${currentApp.id}/download?platform=android',
+          '${ApiConfig.baseUrl}/api/apps/${currentApp.id}/download?file_id=${file['id']}',
         ),
         headers: {'Authorization': 'Bearer ${auth.token}'},
       );
-      if (res.statusCode != 200)
-        throw DownloadException('Backend returned ${res.statusCode}');
-
-      final data = jsonDecode(res.body);
-      final String downloadUrl = data['download_url'] as String;
-      if (!downloadUrl.startsWith('https://'))
-        throw DownloadException('Server returned a non-HTTPS URL');
 
       if (kIsWeb) {
-        final uri = Uri.parse(downloadUrl);
+        final uri = Uri.parse(fileUrl);
         if (await canLaunchUrl(uri)) {
           await launchUrl(uri, mode: LaunchMode.externalApplication);
           if (mounted) {
@@ -303,15 +304,13 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
         return;
       }
 
-      final rawSegment = Uri.parse(
-        downloadUrl,
-      ).pathSegments.last.split('?').first;
+      final rawSegment = Uri.parse(fileUrl).pathSegments.last.split('?').first;
       final fileName = rawSegment.isNotEmpty
           ? rawSegment
           : '${currentApp.name.replaceAll(' ', '_')}.apk';
 
       final apkFile = await DownloadService.instance.downloadApk(
-        downloadUrl,
+        fileUrl,
         fileName: fileName,
         onProgress: (p) {
           if (mounted) setState(() => downloadProgress = p);
@@ -1150,12 +1149,17 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
                                         backgroundColor: BockColors.purple
                                             .withValues(alpha: 0.2),
                                         backgroundImage:
-                                            rating.profileImage != null
+                                            getFullUrl(
+                                              rating.profileImage,
+                                            ).isNotEmpty
                                             ? NetworkImage(
                                                 getFullUrl(rating.profileImage),
                                               )
                                             : null,
-                                        child: rating.profileImage == null
+                                        child:
+                                            getFullUrl(
+                                              rating.profileImage,
+                                            ).isEmpty
                                             ? Text(
                                                 rating.userName[0]
                                                     .toUpperCase(),
@@ -1167,6 +1171,7 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
                                               )
                                             : null,
                                       ),
+
                                       const SizedBox(width: 10),
                                       Expanded(
                                         child: Column(

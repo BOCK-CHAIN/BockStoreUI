@@ -9,8 +9,8 @@ import 'app_detail_screen.dart';
 import 'admin_upload_screen.dart';
 import 'login_screen.dart';
 import 'user_activity_screen.dart';
-import 'package:play_store_app/config/api_config.dart';
-import 'package:play_store_app/config/url_helper.dart';
+import 'package:bockstore/config/api_config.dart';
+import 'package:bockstore/config/url_helper.dart';
 import 'dart:async';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:image_picker/image_picker.dart';
@@ -70,8 +70,14 @@ class _HomeScreenState extends State<HomeScreen>
       if (!context.read<AuthProvider>().isLoggedIn) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: const Text('Sign in to access all features'),
-            backgroundColor: BockColors.cardDark,
+            content: const Text(
+              'Sign in to access all features',
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            backgroundColor: BockColors.purple,
             behavior: SnackBarBehavior.floating,
             duration: const Duration(seconds: 3),
           ),
@@ -156,16 +162,26 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Future<void> fetchRecentUpdates() async {
+    final token = context.read<AuthProvider>().token;
+    if (token == null) {
+      setState(() => loadingUpdates = false);
+      return;
+    }
     try {
       final res = await http.get(
         Uri.parse('${ApiConfig.baseUrl}/api/apps/user/activity'),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Content-Type': 'application/json',
+        },
       );
-      final data = jsonDecode(res.body);
+      if (!mounted) return;
       setState(() {
-        recentUpdates = data;
+        recentUpdates = res.statusCode == 200 ? jsonDecode(res.body) : [];
         loadingUpdates = false;
       });
     } catch (_) {
+      if (!mounted) return;
       setState(() => loadingUpdates = false);
     }
   }
@@ -644,10 +660,10 @@ class _HomeScreenState extends State<HomeScreen>
       icon: CircleAvatar(
         radius: 16,
         backgroundColor: BockColors.purple.withValues(alpha: 0.2),
-        backgroundImage: auth.user?.profileImage != null
+        backgroundImage: getFullUrl(auth.user?.profileImage).isNotEmpty
             ? NetworkImage(getFullUrl(auth.user!.profileImage))
             : null,
-        child: auth.user?.profileImage == null
+        child: getFullUrl(auth.user?.profileImage).isEmpty
             ? Text(
                 auth.user!.name[0].toUpperCase(),
                 style: const TextStyle(
@@ -1187,10 +1203,11 @@ class _HomeScreenState extends State<HomeScreen>
                     CircleAvatar(
                       radius: 42,
                       backgroundColor: BockColors.purple.withValues(alpha: 0.2),
-                      backgroundImage: auth.user?.profileImage != null
+                      backgroundImage:
+                          getFullUrl(auth.user?.profileImage).isNotEmpty
                           ? NetworkImage(getFullUrl(auth.user!.profileImage))
                           : null,
-                      child: auth.user?.profileImage == null
+                      child: getFullUrl(auth.user?.profileImage).isEmpty
                           ? Text(
                               auth.user!.name[0].toUpperCase(),
                               style: const TextStyle(

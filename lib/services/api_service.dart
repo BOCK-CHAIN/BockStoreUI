@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:play_store_app/config/api_config.dart';
+import 'package:bockstore/config/api_config.dart';
 
 class ApiService {
   static Future<Map<String, String>> _getHeaders({

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
-import 'package:play_store_app/config/api_config.dart';
+import 'package:bockstore/config/api_config.dart';
 import '../providers/auth_provider.dart';
 import '../models/app_model.dart';
 import 'package:file_picker/file_picker.dart';
@@ -359,6 +359,7 @@ class _AdminUploadScreenState extends State<AdminUploadScreen>
   @override
   Widget build(BuildContext context) {
     final width = MediaQuery.of(context).size.width;
+    final isMobile = width <= 600;
 
     return Scaffold(
       backgroundColor: BockColors.bgDark,
@@ -406,326 +407,301 @@ class _AdminUploadScreenState extends State<AdminUploadScreen>
           child: Divider(height: 1, color: BockColors.borderDark),
         ),
       ),
-      body: Center(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
-          child: FadeTransition(
-            opacity: _fadeAnim,
-            child: SlideTransition(
-              position: _slideAnim,
-              child: Container(
-                width: width > 900 ? 780 : double.infinity,
-                decoration: BoxDecoration(
-                  color: BockColors.cardDark,
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: BockColors.borderDark),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.35),
-                      blurRadius: 30,
-                      offset: const Offset(0, 10),
-                    ),
-                  ],
+      body: FadeTransition(
+        opacity: _fadeAnim,
+        child: SlideTransition(
+          position: _slideAnim,
+          child: isMobile ? _buildMobileBody() : _buildDesktopBody(width),
+        ),
+      ),
+    );
+  }
+
+  // Mobile: no card, just flat form directly on scaffold
+  Widget _buildMobileBody() {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [_formContent()],
+      ),
+    );
+  }
+
+  // Desktop/web: keep the card layout
+  Widget _buildDesktopBody(double width) {
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+        child: Container(
+          width: width > 900 ? 780 : double.infinity,
+          decoration: BoxDecoration(
+            color: BockColors.cardDark,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: BockColors.borderDark),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.35),
+                blurRadius: 30,
+                offset: const Offset(0, 10),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 24,
+                  vertical: 16,
                 ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 24,
-                        vertical: 16,
-                      ),
-                      decoration: BoxDecoration(
-                        color: BockColors.purple.withValues(alpha: 0.12),
-                        borderRadius: const BorderRadius.only(
-                          topLeft: Radius.circular(20),
-                          topRight: Radius.circular(20),
-                        ),
-                        border: Border(
-                          bottom: BorderSide(color: BockColors.borderDark),
-                        ),
-                      ),
-                      child: Text(
-                        isEdit
-                            ? 'Update the app details below'
-                            : 'Fill in the app details to publish',
-                        style: const TextStyle(
-                          color: BockColors.textSecondaryDark,
-                          fontSize: 13,
-                        ),
-                      ),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.all(24),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          _sectionHeader(
-                            Icons.info_outline_rounded,
-                            'App Info',
-                          ),
-                          const SizedBox(height: 16),
-                          _label('App Name'),
-                          const SizedBox(height: 8),
-                          _field(nameController, 'App name'),
-                          const SizedBox(height: 16),
-                          _label('Description'),
-                          const SizedBox(height: 8),
-                          _field(
-                            descController,
-                            'Describe what the app does...',
-                            maxLines: 3,
-                          ),
-                          const SizedBox(height: 16),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    _label('Version'),
-                                    const SizedBox(height: 8),
-                                    _field(versionController, 'e.g. 1.0.0'),
-                                  ],
-                                ),
-                              ),
-                              const SizedBox(width: 14),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    _label('Size'),
-                                    const SizedBox(height: 8),
-                                    _field(sizeController, 'e.g. 24 MB'),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 16),
-                          _label('Developer'),
-                          const SizedBox(height: 8),
-                          _field(developerController, 'e.g. Acme Corp'),
-                          const SizedBox(height: 16),
-                          _label('Developer Bio'),
-                          const SizedBox(height: 8),
-                          _field(
-                            developerBioController,
-                            'Short bio...',
-                            maxLines: 2,
-                          ),
-                          const SizedBox(height: 16),
-                          _label('Category'),
-                          const SizedBox(height: 8),
-                          DropdownButtonFormField<String>(
-                            initialValue: selectedCategory,
-                            dropdownColor: BockColors.cardDark,
-                            style: const TextStyle(
-                              fontSize: 14,
-                              color: BockColors.textPrimaryDark,
-                            ),
-                            decoration: InputDecoration(
-                              filled: true,
-                              fillColor: BockColors.surfaceDark,
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(12),
-                                borderSide: BorderSide(
-                                  color: BockColors.borderDark,
-                                ),
-                              ),
-                              enabledBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(12),
-                                borderSide: BorderSide(
-                                  color: BockColors.borderDark,
-                                ),
-                              ),
-                              focusedBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(12),
-                                borderSide: const BorderSide(
-                                  color: BockColors.purple,
-                                  width: 1.8,
-                                ),
-                              ),
-                            ),
-                            items:
-                                [
-                                      'Productivity',
-                                      'Tools',
-                                      'Education',
-                                      'Utility',
-                                      'Social',
-                                    ]
-                                    .map(
-                                      (c) => DropdownMenuItem(
-                                        value: c,
-                                        child: Text(c),
-                                      ),
-                                    )
-                                    .toList(),
-                            onChanged: (v) =>
-                                setState(() => selectedCategory = v!),
-                          ),
-                          const SizedBox(height: 16),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    _label('Rated For'),
-                                    const SizedBox(height: 8),
-                                    _field(ratedForController, 'e.g. 3+'),
-                                  ],
-                                ),
-                              ),
-                              const SizedBox(width: 14),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    _label('Package Name *'),
-                                    const SizedBox(height: 8),
-                                    _field(
-                                      packageController,
-                                      'Unique identifier',
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          ),
-
-                          const SizedBox(height: 28),
-                          Divider(color: BockColors.borderDark),
-                          const SizedBox(height: 20),
-
-                          _sectionHeader(Icons.perm_media_rounded, 'Assets'),
-                          const SizedBox(height: 16),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: _assetBtn(
-                                  icon: Icons.image_rounded,
-                                  label: 'Pick Icon',
-                                  onTap: uploading ? null : pickIcon,
-                                  selected: iconFile != null,
-                                  selectedLabel: 'Icon selected',
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: _assetBtn(
-                                  icon: Icons.photo_library_rounded,
-                                  label: 'Screenshots',
-                                  onTap: uploading ? null : pickScreenshots,
-                                  selected: screenshotFiles.isNotEmpty,
-                                  selectedLabel:
-                                      '${screenshotFiles.length} selected',
-                                ),
-                              ),
-                            ],
-                          ),
-
-                          const SizedBox(height: 28),
-                          Divider(color: BockColors.borderDark),
-                          const SizedBox(height: 20),
-
-                          _sectionHeader(
-                            Icons.folder_zip_outlined,
-                            'Downloadable Files',
-                          ),
-                          const SizedBox(height: 16),
-
-                          ..._fileEntries.asMap().entries.map(
-                            (e) => _fileEntryCard(e.key, e.value),
-                          ),
-
-                          OutlinedButton.icon(
-                            onPressed: uploading ? null : _addFileEntry,
-                            icon: const Icon(Icons.add_rounded, size: 16),
-                            label: const Text(
-                              'Add File',
-                              style: TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: BockColors.purpleLight,
-                              side: BorderSide(
-                                color: BockColors.purple.withValues(alpha: 0.4),
-                              ),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              padding: const EdgeInsets.symmetric(
-                                vertical: 12,
-                                horizontal: 20,
-                              ),
-                            ),
-                          ),
-
-                          const SizedBox(height: 28),
-
-                          SizedBox(
-                            width: double.infinity,
-                            height: 52,
-                            child: ElevatedButton(
-                              onPressed: uploading ? null : submit,
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: BockColors.purple,
-                                foregroundColor: Colors.white,
-                                disabledBackgroundColor: BockColors.purple
-                                    .withValues(alpha: 0.4),
-                                elevation: 0,
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(14),
-                                ),
-                              ),
-                              child: uploading
-                                  ? const SizedBox(
-                                      height: 22,
-                                      width: 22,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2.5,
-                                        color: Colors.white,
-                                      ),
-                                    )
-                                  : Row(
-                                      mainAxisAlignment:
-                                          MainAxisAlignment.center,
-                                      children: [
-                                        Icon(
-                                          isEdit
-                                              ? Icons.save_rounded
-                                              : Icons.cloud_upload_rounded,
-                                          size: 20,
-                                        ),
-                                        const SizedBox(width: 8),
-                                        Text(
-                                          isEdit
-                                              ? 'Save Changes'
-                                              : 'Publish App',
-                                          style: const TextStyle(
-                                            fontSize: 16,
-                                            fontWeight: FontWeight.w700,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
+                decoration: BoxDecoration(
+                  color: BockColors.purple.withValues(alpha: 0.12),
+                  borderRadius: const BorderRadius.only(
+                    topLeft: Radius.circular(20),
+                    topRight: Radius.circular(20),
+                  ),
+                  border: Border(
+                    bottom: BorderSide(color: BockColors.borderDark),
+                  ),
+                ),
+                child: Text(
+                  isEdit
+                      ? 'Update the app details below'
+                      : 'Fill in the app details to publish',
+                  style: const TextStyle(
+                    color: BockColors.textSecondaryDark,
+                    fontSize: 13,
+                  ),
                 ),
               ),
-            ),
+              Padding(padding: const EdgeInsets.all(24), child: _formContent()),
+            ],
           ),
         ),
       ),
+    );
+  }
+
+  // Shared form content used by both layouts
+  Widget _formContent() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _sectionHeader(Icons.info_outline_rounded, 'App Info'),
+        const SizedBox(height: 16),
+        _label('App Name'),
+        const SizedBox(height: 8),
+        _field(nameController, 'App name'),
+        const SizedBox(height: 16),
+        _label('Description'),
+        const SizedBox(height: 8),
+        _field(descController, 'Describe what the app does...', maxLines: 3),
+        const SizedBox(height: 16),
+        Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _label('Version'),
+                  const SizedBox(height: 8),
+                  _field(versionController, 'e.g. 1.0.0'),
+                ],
+              ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _label('Size'),
+                  const SizedBox(height: 8),
+                  _field(sizeController, 'e.g. 24 MB'),
+                ],
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        _label('Developer'),
+        const SizedBox(height: 8),
+        _field(developerController, 'e.g. Acme Corp'),
+        const SizedBox(height: 16),
+        _label('Developer Bio'),
+        const SizedBox(height: 8),
+        _field(developerBioController, 'Short bio...', maxLines: 2),
+        const SizedBox(height: 16),
+        _label('Category'),
+        const SizedBox(height: 8),
+        DropdownButtonFormField<String>(
+          initialValue: selectedCategory,
+          dropdownColor: BockColors.cardDark,
+          style: const TextStyle(
+            fontSize: 14,
+            color: BockColors.textPrimaryDark,
+          ),
+          decoration: InputDecoration(
+            filled: true,
+            fillColor: BockColors.surfaceDark,
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: BockColors.borderDark),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: BockColors.borderDark),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(
+                color: BockColors.purple,
+                width: 1.8,
+              ),
+            ),
+          ),
+          items: [
+            'Productivity',
+            'Tools',
+            'Education',
+            'Utility',
+            'Social',
+          ].map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
+          onChanged: (v) => setState(() => selectedCategory = v!),
+        ),
+        const SizedBox(height: 16),
+        Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _label('Rated For'),
+                  const SizedBox(height: 8),
+                  _field(ratedForController, 'e.g. 3+'),
+                ],
+              ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _label('Package Name *'),
+                  const SizedBox(height: 8),
+                  _field(packageController, 'Unique identifier'),
+                ],
+              ),
+            ),
+          ],
+        ),
+
+        const SizedBox(height: 28),
+        Divider(color: BockColors.borderDark),
+        const SizedBox(height: 20),
+
+        _sectionHeader(Icons.perm_media_rounded, 'Assets'),
+        const SizedBox(height: 16),
+        Row(
+          children: [
+            Expanded(
+              child: _assetBtn(
+                icon: Icons.image_rounded,
+                label: 'Pick Icon',
+                onTap: uploading ? null : pickIcon,
+                selected: iconFile != null,
+                selectedLabel: 'Icon selected',
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _assetBtn(
+                icon: Icons.photo_library_rounded,
+                label: 'Screenshots',
+                onTap: uploading ? null : pickScreenshots,
+                selected: screenshotFiles.isNotEmpty,
+                selectedLabel: '${screenshotFiles.length} selected',
+              ),
+            ),
+          ],
+        ),
+
+        const SizedBox(height: 28),
+        Divider(color: BockColors.borderDark),
+        const SizedBox(height: 20),
+
+        _sectionHeader(Icons.folder_zip_outlined, 'Downloadable Files'),
+        const SizedBox(height: 16),
+
+        ..._fileEntries.asMap().entries.map(
+          (e) => _fileEntryCard(e.key, e.value),
+        ),
+
+        OutlinedButton.icon(
+          onPressed: uploading ? null : _addFileEntry,
+          icon: const Icon(Icons.add_rounded, size: 16),
+          label: const Text(
+            'Add File',
+            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+          ),
+          style: OutlinedButton.styleFrom(
+            foregroundColor: BockColors.purpleLight,
+            side: BorderSide(color: BockColors.purple.withValues(alpha: 0.4)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+            padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 20),
+          ),
+        ),
+
+        const SizedBox(height: 28),
+
+        SizedBox(
+          width: double.infinity,
+          height: 52,
+          child: ElevatedButton(
+            onPressed: uploading ? null : submit,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: BockColors.purple,
+              foregroundColor: Colors.white,
+              disabledBackgroundColor: BockColors.purple.withValues(alpha: 0.4),
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+            ),
+            child: uploading
+                ? const SizedBox(
+                    height: 22,
+                    width: 22,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2.5,
+                      color: Colors.white,
+                    ),
+                  )
+                : Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        isEdit
+                            ? Icons.save_rounded
+                            : Icons.cloud_upload_rounded,
+                        size: 20,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        isEdit ? 'Save Changes' : 'Publish App',
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
+          ),
+        ),
+      ],
     );
   }
 

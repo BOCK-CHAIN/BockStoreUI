@@ -108,49 +108,61 @@ class AuthService {
   Future<String?> uploadProfileImage(XFile image) async {
     final token = await getToken();
 
-    var request = http.MultipartRequest(
-      "PUT",
-      Uri.parse("${ApiConfig.baseUrl}/api/auth/profile-image"),
+    // Determine MIME type
+    final ext = image.name.split('.').last.toLowerCase();
+    final mimeType = ext == 'png'
+        ? 'image/png'
+        : ext == 'webp'
+        ? 'image/webp'
+        : 'image/jpeg';
+
+    // Step 1 — get presigned URL from your backend
+    final presignedRes = await http.get(
+      Uri.parse(
+        '${ApiConfig.baseUrl}/api/auth/profile-image/presigned-url?fileType=$mimeType',
+      ),
+      headers: {'Authorization': 'Bearer $token'},
     );
 
-    request.headers["Authorization"] = "Bearer $token";
+    if (presignedRes.statusCode != 200) return null;
 
-    if (kIsWeb) {
-      Uint8List bytes = await image.readAsBytes();
+    final presignedData = jsonDecode(presignedRes.body);
+    final String uploadUrl = presignedData['uploadUrl'];
+    final String publicUrl = presignedData['publicUrl'];
+    final String key = presignedData['key'];
 
-      request.files.add(
-        http.MultipartFile.fromBytes(
-          "profile_image",
-          bytes,
-          filename: image.name,
-        ),
-      );
-    } else {
-      request.files.add(
-        await http.MultipartFile.fromPath("profile_image", image.path),
-      );
+    // Step 2 — upload directly to S3 (no auth header)
+    final bytes = await image.readAsBytes();
+    final s3Res = await http.put(
+      Uri.parse(uploadUrl),
+      headers: {'Content-Type': mimeType},
+      body: bytes,
+    );
+
+    if (s3Res.statusCode != 200) return null;
+
+    // Step 3 — tell backend to save the URL
+    final confirmRes = await http.put(
+      Uri.parse('${ApiConfig.baseUrl}/api/auth/profile-image'),
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $token',
+      },
+      body: jsonEncode({'publicUrl': publicUrl, 'key': key}),
+    );
+
+    if (confirmRes.statusCode != 200) return null;
+
+    // Update cached user in SharedPreferences
+    final prefs = await SharedPreferences.getInstance();
+    final userStr = prefs.getString(_userKey);
+    if (userStr != null) {
+      final userMap = jsonDecode(userStr);
+      userMap['profile_image'] = publicUrl;
+      await prefs.setString(_userKey, jsonEncode(userMap));
     }
 
-    final response = await request.send();
-
-    if (response.statusCode == 200) {
-      final res = await http.Response.fromStream(response);
-      final data = jsonDecode(res.body);
-
-      final prefs = await SharedPreferences.getInstance();
-      final userStr = prefs.getString(_userKey);
-
-      if (userStr != null) {
-        final userMap = jsonDecode(userStr);
-        userMap["profile_image"] = data["profile_image"];
-
-        await prefs.setString(_userKey, jsonEncode(userMap));
-      }
-
-      return data["profile_image"];
-    }
-
-    return null;
+    return publicUrl;
   }
 
   Future<bool> deleteAccount() async {

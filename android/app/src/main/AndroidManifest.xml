@@ -11,7 +11,7 @@
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"/>
 
     <application
-        android:label="play_store_app"
+        android:label="Bock Store"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
 
@@ -36,7 +36,7 @@
         <!-- open_filex FileProvider — allows system installer to open APKs via content:// URI -->
         <provider
             android:name="androidx.core.content.FileProvider"
-            android:authorities="com.example.play_store_app.fileprovider"
+            android:authorities="com.example.bockstore.fileprovider"
             android:exported="false"
             android:grantUriPermissions="true">
             <meta-data
